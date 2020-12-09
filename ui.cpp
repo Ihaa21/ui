@@ -5,39 +5,7 @@
    $Creator: Ihor Szlachtycz $
    $Notice: (C) Copyright 2014 by Dream.Inc, Inc. All Rights Reserved. $
    ======================================================================== */
-        
-        // NOTE: This is the API i want
-#if 0
-        UiSetLayer(2);
-        UiDisplayU32("Gold", Gold, V2());
-        UiDisplayU32("Lives", Lives, V2());
 
-        if (UiTextureButton(Pos, Size, TextureId_SettingsIcon))
-        {
-            PlayState->UiPlayingState.SettingsOpen = true;
-            ChangeLevelState(PlayState, LevelState_Paused);
-        }
-
-        UiBeginPanel();
-        UiPanelImage(Size, TextureId_ToolTip);
-        UiPanelNextRow();
-
-        for ()
-        {
-            switch (Button)
-            {
-                        
-            }
-        }
-
-        // NOTE: Draws our background?
-        UiEndPanel();
-
-        UiSetLayer(1);
-        // NOTE: Draw fullscreen game over?
-#endif
-
-// TODO: We got the same code in editor
 #define UI_FILE_LINE_ID() ((u64)(__FILE__) + (u64)(__LINE__))
 
 //
@@ -266,6 +234,7 @@ inline ui_scroll_result UiGetScrollData(f32 MenuDim, f32 ElementDim, u64 NumElem
 #define UiScrollY(InputState, UiBounds, RequiredDelta, ScrollSpeed, CurrScrollVel) UiScroll_(InputState, UiBounds, false, RequiredDelta, ScrollSpeed, CurrScrollVel, uptr(CurrScrollVel) | INTERACTION_FILE_LINE_ID())
 inline void UiScroll_(input_state* InputState, aabb2 UiBounds, b32 ScrollX, f32 RequiredDelta, f32 ScrollSpeed, f32* CurrScrollVel, u64 RefId)
 {
+#if 0
     interaction_ref UiScrollRef = {};
     UiScrollRef.Id = RefId;
 
@@ -320,6 +289,7 @@ inline void UiScroll_(input_state* InputState, aabb2 UiBounds, b32 ScrollX, f32 
         // NOTE: Only apply drag when we let go of the scroll and want velocity to continue
         *CurrScrollVel *= 0.85f;
     }
+#endif
 }
 
 //
@@ -336,11 +306,14 @@ inline void UiImage(ui_state* UiState, ui_constraint Constraint, u32 Flags, aabb
 
 inline void UiRect(ui_state* UiState, ui_constraint Constraint, u32 Flags, aabb2 Bounds, v4 Color)
 {
+#if 0
     UiImage(UiState, Constraint, Flags, Bounds, AssetTextureId(Texture_White), Color);
+#endif
 }
 
 inline void UiRectOutline(ui_state* UiState, aabb2 Bounds, v4 Color, f32 Thickness)
 {
+#if 0
     v2 Center = AabbGetCenter(Bounds);
     v2 Radius = AabbGetRadius(Bounds);
     f32 HalfThickness = Thickness/2;
@@ -354,6 +327,7 @@ inline void UiRectOutline(ui_state* UiState, aabb2 Bounds, v4 Color, f32 Thickne
     UiRect(UiState, UiConstraint_None, 0, LeftBox, Color);
     UiRect(UiState, UiConstraint_None, 0, RightBox, Color);
     UiRect(UiState, UiConstraint_None, 0, BottomBox, Color);
+#endif
 }
 
 inline f32 UiTextGetLineAdvance(ui_state* UiState, ui_font* Font, f32 CharHeight)
@@ -461,6 +435,7 @@ inline aabb2 UiGetTextBounds(ui_state* UiState, ui_constraint Constraint, u32 Fo
 inline void UiText(ui_state* UiState, ui_constraint Constraint, u32 FontId, f32 CharHeight,
                    v2 TopLeftTextPos, f32 SentenceWidth, char* Text, v4 TintColor)
 {
+#if 0
     // TODO: Floats seem to fail for me at higher resolutions and so we get text that displays slightly different at larger resolutions.
     // It might not be a issue but we can fix this by doing all the math in fixed point, or normalizing to working closer to 0, and then
     // offset only for displaying.
@@ -563,6 +538,7 @@ inline void UiText(ui_state* UiState, ui_constraint Constraint, u32 FontId, f32 
         PrevGlyph = CurrGlyph;
         ++Text;
     }
+#endif
 }
 
 inline void UiText(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 Bounds, f32 CharHeight, char* Text, v4 TintColor)
@@ -634,6 +610,7 @@ inline ui_button_interaction UiButton_(ui_state* UiState, ui_constraint Constrai
     Bounds = UiApplyConstraint(UiState, Constraint, Bounds);
     ui_button_interaction Result = UiProcessElement(UiState, Flags, Bounds, UiElementRef(UiType_Button, TextureId.All * RefId));
 
+#if 0
     // NOTE: Animate button
     b32 RenderHighlights = false;
     aabb2 HighlightBounds = {};
@@ -696,6 +673,7 @@ inline ui_button_interaction UiButton_(ui_state* UiState, ui_constraint Constrai
     {
         UiRectOutline(UiState, HighlightBounds, HighlightColor, 2);
     }
+#endif
     
     return Result;
 }
@@ -703,6 +681,7 @@ inline ui_button_interaction UiButton_(ui_state* UiState, ui_constraint Constrai
 inline void UiScrollMenu(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 MenuBounds, f32 CharHeight, f32 TextPad,
                          f32 SliderWidth, u32 NumOptions, char** Options)
 {
+#if 0
     // TODO: Convert all UI to use float positions that represent pixels (or fixed point). We want sub pixel precision and it gets weird
     // with some text we are rendering
     Assert(UiState->NumScrollMenus < UiState->MaxNumScrollMenus);
@@ -753,11 +732,13 @@ inline void UiScrollMenu(ui_state* UiState, ui_constraint Constraint, u32 FontId
         aabb2 ScrollBounds = AabbMinMax(V2(MenuBounds.Max.x - SliderWidth, MenuBounds.Min.y), MenuBounds.Max);
         UiVerticalSlider(UiState, UiConstraint_None, ScrollBounds, V2(SliderWidth/2, SliderWidth/2), SliderY);
     }
+#endif
 }
 
 inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 ButtonBounds, f32 TextPad,
                        f32 SliderWidth, u32 NumOptions, u32 MaxNumShownOptions, char** Options, u32* ChosenOption)
 {
+#if 0
     // TODO: Because we have Z, when we hold the scroll bar and move to the button and let go, we let
     // go of the scrolling bar and click the button. We want the scroll bar to take priority but Z
     // prevents that. I think we should stick to layers, and have scroll bars take priority in a layer
@@ -855,6 +836,7 @@ inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, 
             UiVerticalSlider(UiState, UiConstraint_None, SliderBounds, V2(SliderWidth/2, SliderWidth/2), SliderY);
         }
     }
+#endif
 }
 
 inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, v2 TopLeftPos, f32 TextPad, f32 TextWidth, f32 CharHeight,
@@ -868,6 +850,7 @@ inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, 
 inline void UiHorizontalSlider(ui_state* UiState, ui_constraint Constraint, aabb2 SliderBounds,
                                v2 KnobRadius, f32* PercentValue)
 {
+#if 0
     input_state* InputState = UiState->InputState;
     interaction_ref SliderRef = UiElementRef(UiType_HorizontalSlider, u32(uintptr_t(PercentValue)));
 
@@ -902,11 +885,13 @@ inline void UiHorizontalSlider(ui_state* UiState, ui_constraint Constraint, aabb
     UiRect(UiState, UiConstraint_None, 0, SliderBounds, V4(0.0f, 0.0f, 0.0f, 0.7f));
     UiRect(UiState, UiConstraint_None, 0, SliderKnob, V4(0, 0, 0, 1));
     UiRectOutline(UiState, SliderKnob, V4(0.2f, 0.2f, 0.2f, 1.0f), 2);
+#endif
 }
 
 inline void UiVerticalSlider(ui_state* UiState, ui_constraint Constraint, aabb2 SliderBounds,
                              v2 KnobRadius, f32* PercentValue)
 {
+#if 0
     input_state* InputState = UiState->InputState;
     interaction_ref SliderRef = UiElementRef(UiType_HorizontalSlider, u32(uintptr_t(PercentValue)));
     
@@ -941,268 +926,6 @@ inline void UiVerticalSlider(ui_state* UiState, ui_constraint Constraint, aabb2 
     UiRect(UiState, UiConstraint_None, 0, SliderBounds, V4(0.0f, 0.0f, 0.0f, 0.7f));
     UiRect(UiState, UiConstraint_None, 0, SliderKnob, V4(0, 0, 0, 1));
     UiRectOutline(UiState, SliderKnob, V4(0.2f, 0.2f, 0.2f, 1.0f), 2);
-}
-
-inline void UiFadeImage(ui_state* UiState, ui_constraint Constraint, aabb2 Bounds,
-                        asset_texture_id TextureId, v4 TintColor = V4(1, 1, 1, 1))
-{
-    Assert(UiState->NumFadeImages < UiState->MaxNumFadeImages);
-    ui_fade_image_saved_state* FadeImage = UiState->FadeImageSave + UiState->NumFadeImages++;
-
-    FadeImage->Bounds = Bounds;
-    FadeImage->Constraint = Constraint;
-    FadeImage->TextureId = TextureId;
-    FadeImage->TintColor = TintColor;
-}
-
-inline void UiFadeText(ui_state* UiState, ui_constraint Constraint, asset_font_id FontId, f32 CharHeight,
-                       v2 TextPos, f32 SentenceWidth, char* Text, v4 TintColor = V4(1, 1, 1, 1))
-{
-    Assert(UiState->NumFadeText < UiState->MaxNumFadeText);
-    ui_fade_text_saved_state* FadeText = UiState->FadeTextSave + UiState->NumFadeText++;
-    
-    FadeText->Text = Text;
-    FadeText->Constraint = Constraint;
-    FadeText->FontId = FontId;
-    FadeText->CharHeight = CharHeight;
-    FadeText->TextPos = TextPos;
-    FadeText->SentenceWidth = SentenceWidth;
-    FadeText->TintColor = TintColor;
-}
-
-//
-// NOTE: Panel functions
-//
-
-// NOTE: Element creation code
-
-#if 0
-UiSetLayer(2);
-UiDisplayU32("Gold", Gold, V2());
-UiDisplayU32("Lives", Lives, V2());
-UiTextureButton(Pos, Size, TextureId_SettingsIcon)
-UiSlider();
-
-UiBeginPanel();
-UiPanelImage(Size, TextureId_ToolTip);
-UiPanelDropDown("AssetId", AssetOptions, NumAssetOptions, &RenderId);
-UiPanelF32("PosX", &Pos.x);
-UiPanelU32("RoundId", &RoundId);
-UiPanelNextRow();
-UiEndPanel();
-#endif
-
-inline ui_panel UiBeginPanel(ui_state* UiState, v2 StartPos, f32 Size, f32 MaxWidth)
-{
-    Assert(MaxWidth >= Size);
-    
-    ui_panel Result = {};
-#if 0
-    Result.UiState = UiState;
-    Result.MaxWidth = MaxWidth;
-    Result.StartPos = StartPos;
-    Result.MinPosY = 1.0f; // NOTE: Y decreases so we set to 1
-    Result.Size = Size;
-    Result.StepGap = 0.2f*V2(Size, Size);
-    Result.RowStepY = Size;
-    Result.CurrPos = StartPos - V2(0.0f, Result.StepGap.y);
-#endif    
-    return Result;
-}
-
-inline void UiPanelNextRow(ui_panel* Panel)
-{
-#if 0
-    Panel->CurrPos.x = Panel->StartPos.x;
-    Panel->CurrPos.y -= Panel->RowStepY + Panel->StepGap.y;
-
-    // NOTE: Get the current maximum Y of panel
-    Panel->MinPosY = Min(Panel->MinPosY, Panel->CurrPos.y);
-#endif
-}
-
-// NOTE: We do this because macros are dumb in C++, https://stackoverflow.com/questions/11761703/overloading-macro-on-number-of-arguments
-#define UI_PANEL_BUTTON_GET_MACRO(_1,_2,_3,_4,NAME,...) NAME
-#define UiPanelButton(...) EXPAND(UI_PANEL_BUTTON_GET_MACRO(__VA_ARGS__, UiPanelButton4, UiPanelButton3, UiPanelButton2)(__VA_ARGS__))
-#define UiPanelButton2(Panel, Name) UiPanelButton_(Panel, Name)
-#define UiPanelButton3(Panel, Flags, TextureId) UiPanelButton_(Panel, Flags, TextureId, (u32)UI_FILE_LINE_ID())
-#define UiPanelButton4(Panel, Flags, TextureId, RefId) UiPanelButton_(Panel, Flags, TextureId, (u32)UI_FILE_LINE_ID() + RefId)
-inline ui_button_interaction UiPanelButton_(ui_panel* Panel, u32 Flags, u32 TextureId, u32 RefId)
-{
-#if 0
-    Panel->CurrPos.x += Panel->StepGap.x;
-    
-    aabb2 ButtonBounds = AabbMinMax(V2(Panel->CurrPos.x, Panel->CurrPos.y - Panel->Size),
-                                    V2(Panel->CurrPos.x + Panel->Size, Panel->CurrPos.y));
-
-    // TODO: FIX
-#if 0
-    if (!(Flags & UiElementFlag_NotAspectCorrect))
-    {
-        // NOTE: We handle the aspect ratio here so remove the flag to not do it twice
-        ButtonBounds = UiMakeAspectCorrect(Panel->UiState->AspectRatio, ButtonBounds);
-        Flags |= UiElementFlag_NotAspectCorrect;
-    }
-#endif
-    
-    Panel->CurrPos.x += AabbGetDim(ButtonBounds).x;
-#endif
-    
-    // TODO: FIX
-    return {}; //UiButton(Panel->UiState, ButtonBounds, Flags, TextureId, RefId);
-}
-
-inline ui_button_interaction UiPanelButton_(ui_panel* Panel, char* Name)
-{
-    ui_button_interaction Result = {};
-    
-#if 0
-    // TODO: Customize??
-    u32 FontId = Font_General;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    // NOTE: Calculate text and button bounds
-    aabb2 ButtonBounds = {};
-    aabb2 TextBounds = {};
-    {
-        f32 TextInStep = Panel->Size * 0.1f;
-        f32 TextMinY = Panel->CurrPos.y - Panel->Size + TextInStep;
-        f32 TextMaxY = Panel->CurrPos.y - TextInStep;
-        v2 TextStartPos = V2(Panel->CurrPos.x + TextInStep, UiTextGetStartY(Panel->UiState, FontId, TextMinY, TextMaxY));
-
-        // TODO: FIX
-        TextBounds = {}; //UiSizeText(Panel->UiState, Font_General, TextStartPos, TextMaxY - TextMinY, Name);
-        ButtonBounds = AabbMinMax(V2(TextBounds.Min.x - TextInStep, Panel->CurrPos.y - Panel->Size),
-                                  V2(TextBounds.Max.x + TextInStep, Panel->CurrPos.y));
-    }
-
-    // NOTE: Make sure our bounds are correct
-    f32 Epsilon = 0.001f;
-    Assert((ButtonBounds.Max.y - ButtonBounds.Min.y) - Epsilon <= Panel->Size);
-    Assert((ButtonBounds.Max.y - ButtonBounds.Min.y) + Epsilon >= Panel->Size);
-
-    ui_button_interaction Result = UiProcessButton(Panel->UiState, ButtonBounds, UiElementRef(UiType_Button, (u32)Name));
-
-    // NOTE: Animate button
-    v4 Color = V4(1, 1, 1, 1);
-    if (Result == UiButtonInteraction_Hover)
-    {
-        Color = V4(0, 1, 1, 1);
-    }
-    else if (Result == UiButtonInteraction_Selected)
-    {
-        Color = V4(0.4f, 0.6f, 0.6f, 1.0f);
-    }
-
-    // TODO: Can this be a text button?
-    // TODO: FIX
-    //UiRenderText(Panel->UiState, FontId, V2(TextBounds.Min.x, TextBounds.Max.y), Name, Color);
-    //UiRect(Panel->UiState, ButtonBounds, 0, V4(0.5f, 0.5f, 1.0f, 1.0f));
-
-    Panel->CurrPos.x += AabbGetDim(ButtonBounds).x;
-#endif
-    
-    return Result;
-}
-
-inline void UiPanelDropDown(ui_panel* Panel, char** Options, u32 NumOptions, u32* OptionResult)
-{
-#if 0
-    // TODO: Customize??
-    u32 NumShownOptions = 4;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    f32 DropDownWidth = 4*Panel->Size;
-    aabb2 DropDownBounds = AabbMinMax(V2(Panel->CurrPos.x, Panel->CurrPos.y - Panel->Size),
-                                      V2(Panel->CurrPos.x + DropDownWidth, Panel->CurrPos.y));
-
-    Panel->CurrPos.x += DropDownWidth;
-
-    // TODO: FIX
-    //UiDropDown(Panel->UiState, DropDownBounds, NumOptions, NumShownOptions, Options, OptionResult);
-#endif
-}
-
-inline void UiPanelF32(ui_panel* Panel, char* Name, f32* Val)
-{
-#if 0
-    play_state* InputState = Panel->UiState->InputState;
-    // TODO: Customize?
-    u32 FontId = Font_General;
-    input_mouse* Input = Panel->UiState->Input;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    char NewText[512];
-    Snprintf(NewText, sizeof(NewText), "%s: %f", Name, *Val);
-
-    aabb2 TextBounds = {};
-    {
-        f32 TextMinY = Panel->CurrPos.y - Panel->Size;
-        f32 TextMaxY = Panel->CurrPos.y;
-        v2 TextStartPos = V2(Panel->CurrPos.x, UiTextGetStartY(Panel->UiState, FontId, TextMinY, TextMaxY));
-        // TODO: FIX
-        TextBounds = {}; //UiSizeText(Panel->UiState, FontId, TextStartPos, TextMaxY - TextMinY, NewText);
-    }
-
-    interaction_ref F32Ref = UiElementRef(UiType_DragF32, (u32)Val);
-
-    b32 IntersectText = UiIntersect(TextBounds, Panel->UiState->Input->ScreenPos);
-    b32 MouseDownOrReleased = ((Input->ButtonFlags & MouseButtonFlag_PressedOrHeld) ||
-                               (Input->ButtonFlags & MouseButtonFlag_Released));
-    Panel->UiState->MouseTouchingUi = Panel->UiState->MouseTouchingUi || IntersectText;
-    if (IntersectText || (MouseDownOrReleased && InteractionsAreSame(InputState->PrevHot.Ref, F32Ref)))
-    {
-        interaction DragF32Interaction = {};
-        DragF32Interaction.Type = Interaction_DragF32;
-        DragF32Interaction.Ref = F32Ref;
-        DragF32Interaction.DragF32.Value = Val;
-        
-        PlayerAddInteraction(InputState, DragF32Interaction);
-    }
-
-    // NOTE: Check ui drag interaction from last frame
-    ui_button_interaction Interaction = UiButtonInteraction_None;
-    if (InteractionsAreSame(F32Ref, InputState->PrevHot.Ref))
-    {
-        Interaction = InputState->PrevHot.DragF32.Interaction;
-    }
-
-    v4 Color = V4(1, 1, 1, 1);
-    if (Interaction == UiButtonInteraction_Hover)
-    {
-        Color = V4(0, 1, 1, 1);
-    }
-    else if (Interaction == UiButtonInteraction_Selected)
-    {
-        Color = V4(0.4f, 0.6f, 0.6f, 1.0f);
-    }
-
-    // TODO: FIX
-    //UiRenderText(Panel->UiState, FontId, V2(TextBounds.Min.x, TextBounds.Max.y), NewText, Color);
-
-    // NOTE: Update panel
-    Panel->CurrPos.x += AabbGetDim(TextBounds).x;
-    UiPanelNextRow(Panel);
-#endif
-}
-
-inline void UiEndPanel(ui_panel* Panel)
-{
-#if 0
-    // NOTE: Get the maximum bounds of panel
-    Panel->MinPosY = Min(Panel->MinPosY, Panel->CurrPos.y);
-
-    // NOTE: Add border to the panel
-    Panel->MinPosY -= Panel->RowStepY + Panel->StepGap.y;
-    
-    // NOTE: Create background of the panel
-    v2 Min = V2(Panel->StartPos.x, Panel->MinPosY);
-    v2 Max = V2(Panel->StartPos.x + Panel->MaxWidth, Panel->StartPos.y);
-    // TODO: FIX
-    //UiRect(Panel->UiState, AabbMinMax(Min, Max), 0, V4(0, 0, 0, 1));
 #endif
 }
 
@@ -1308,81 +1031,6 @@ inline void UiStateGenerateRenderJobs(ui_state* UiState)
 
     f32 FrameTime = UiState->InputState->CurrInput.FrameTime;
     render_state* RenderState = UiState->RenderState;
-
-    // NOTE: Process fade images
-    {
-        u32 CurrFadeImage = 0;
-        while (CurrFadeImage < UiState->NumFadeImages)
-        {
-            ui_fade_image_saved_state* FadeImage = UiState->FadeImageSave + CurrFadeImage;
-
-            if (FadeImage->TintColor.a > 0.95)
-            {
-                FadeImage->TintColor.a -= (0.05f*2.0f*FrameTime);
-            }
-            else
-            {
-                FadeImage->TintColor.a -= (0.95f*3.0f*FrameTime);
-            }
-
-            if (FadeImage->TintColor.a <= 0.0f)
-            {
-                // NOTE: Remove the fade image by swapping
-                if (UiState->NumFadeImages == 1)
-                {
-                    UiState->NumFadeImages = 0;
-                    continue;
-                }
-                else
-                {
-                    *FadeImage = UiState->FadeImageSave[--UiState->NumFadeImages];
-                    continue;
-                }
-            }
-
-            UiImage(UiState, FadeImage->Constraint, 0, FadeImage->Bounds, FadeImage->TextureId, FadeImage->TintColor);
-
-            CurrFadeImage += 1;
-        }
-    }
-
-    // NOTE: Process fade text
-    {
-        u32 CurrFadeText = 0;
-        while (CurrFadeText < UiState->NumFadeText)
-        {
-            ui_fade_text_saved_state* FadeText = UiState->FadeTextSave + CurrFadeText;
-
-            if (FadeText->TintColor.a > 0.95)
-            {
-                FadeText->TintColor.a -= 0.25f*FrameTime;
-            }
-            else
-            {
-                FadeText->TintColor.a -= 1.0f*FrameTime;
-            }
-
-            if (FadeText->TintColor.a <= 0.0f)
-            {
-                // NOTE: Remove the fade image by swapping
-                if (UiState->NumFadeText == 1)
-                {
-                    UiState->NumFadeText = 0;
-                    continue;
-                }
-                else
-                {
-                    *FadeText = UiState->FadeTextSave[--UiState->NumFadeText];
-                    continue;
-                }
-            }
-            
-            UiText(UiState, FadeText->Constraint, FadeText->FontId, FadeText->CharHeight,
-                   FadeText->TextPos, FadeText->SentenceWidth, FadeText->Text, FadeText->TintColor);
-
-            CurrFadeText += 1;
-        }
-    }
     
     // NOTE: Setup render data
     // TODO: We hard set the font here right now, support multiple fonts
@@ -1394,40 +1042,6 @@ inline void UiStateGenerateRenderJobs(ui_state* UiState)
     UiState->NumScrollMenus = 0;
     UiState->NumDropDowns = 0;
     UiState->CurrZ = UiState->StepZ;
-    
-#if 0
-    case ButtonType_Settings:
-    {
-        settings_data* Data = (settings_data*)CurrElement->Button.Data;
-        if (Data->IsInputState)
-        {
-            Data->InputState->SettingsOpen = true;
-            ChangeLevelState(Data->InputState, LevelState_Paused);
-        }
-        else
-        {
-            Data->MenuState->SettingsOpen = true;
-            // TODO: Fix this
-            //GameState->StopTimers = true;
-        }
-    } break;
-                        
-    case ButtonType_ChooseLevel:
-    {
-        u32* MenuState = (u32*)CurrElement->Button.Data;
-        // TODO: We want a fade in
-        *MenuState = MenuState_LevelSelect;
-    } break;
-
-    case ButtonType_LevelSelector:
-    {
-        level_selector* Selector = (level_selector*)CurrElement->Button.Data;
-        if (Selector->VelX == 0.0f)
-        {
-            *Selector->LevelToPlay = Selector->LevelId;
-        }
-    } break;
-#endif
 
     if (InputIsMainPointerOnly(&UiState->InputState->CurrInput))
     {
@@ -1454,6 +1068,7 @@ inline void UiStateEndFrame(ui_state* UiState)
 // NOTE: Ui Interaction Handling
 //
 
+#if 0
 INPUT_INTERACTION_HANDLER(UiInteractionHandler)
 {
     b32 Result = false;
@@ -1603,19 +1218,4 @@ INPUT_INTERACTION_HANDLER(UiInteractionHandler)
 
     return Result;
 }
-
-//
-// NOTE: Layout functions
-//
-
-inline v2 GetCenteredTextPos(aabb2 TextBounds)
-{
-    // IMPORTANT: Its assumed we are centering around (0, 0)
-    v2 Radius = AabbGetRadius(TextBounds);
-    v2 Offset = TextBounds.Max - Radius;
-    
-    aabb2 CenteredBounds = Translate(TextBounds, -Offset);
-    
-    v2 TopLeftPos = V2(CenteredBounds.Min.x, CenteredBounds.Max.y);
-    return TopLeftPos;
-}
+#endif

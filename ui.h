@@ -8,6 +8,28 @@
    $Notice: (C) Copyright 2014 by Dream.Inc, Inc. All Rights Reserved. $
    ======================================================================== */
 
+#include "math\math.h"
+#include "memory\memory.h"
+
+//
+// TODO: FIX
+//
+
+struct asset_texture_id
+{
+    u64 Val;
+};
+
+struct asset_font_id
+{
+    u64 Val;
+};
+
+struct file_glyph
+{
+    u32 Test;
+};
+
 //
 // NOTE: Ui Helper Structs
 //
@@ -45,7 +67,16 @@ enum ui_element_flags
 };
 
 //
-// NOTE: Ui Interaction data
+// NOTE: Ui Input Data
+//
+
+struct ui_input
+{
+    v2 ScreenPos;
+};
+
+//
+// NOTE: Ui Interaction Data
 //
 
 // TODO: We only need these cuz we don't hash well
@@ -60,13 +91,13 @@ enum ui_type
     UiType_DragF32,
 };
 
-enum ui_button_interaction
+enum ui_element_interaction
 {
-    UiButtonInteraction_None,
+    UiElementInteraction_None,
 
-    UiButtonInteraction_Hover,
-    UiButtonInteraction_Selected,
-    UiButtonInteraction_Released,
+    UiElementInteraction_Hover,
+    UiElementInteraction_Selected,
+    UiElementInteraction_Released,
 };
 
 struct ui_slider_interaction
@@ -104,45 +135,6 @@ struct ui_dropdown_saved_state
 struct ui_scroll_menu_saved_state
 {
     f32* ScrollPos;
-};
-
-struct ui_fade_image_saved_state
-{
-    ui_constraint Constraint;
-    aabb2 Bounds;
-    asset_texture_id TextureId;
-    v4 TintColor;
-};
-
-struct ui_fade_text_saved_state
-{
-    ui_constraint Constraint;
-    char* Text;
-    asset_font_id FontId;
-    f32 CharHeight;
-    v2 TextPos;
-    f32 SentenceWidth;
-    v4 TintColor;
-};
-
-//
-// NOTE: Ui Panel
-//
-
-struct ui_state;
-struct ui_panel
-{
-    ui_state* UiState;
-
-    f32 MaxWidth;
-    v2 StartPos;
-    f32 MinPosY;
-    f32 RowStepY;
-
-    v2 StepGap;
-    f32 Size;
-    
-    v2 CurrPos;
 };
 
 //
@@ -212,9 +204,7 @@ struct input_state;
 struct ui_state
 {
     block_arena* BlockArena;
-    input_state* InputState;
-    render_state* RenderState;
-
+    
     i32 RenderWidth;
     i32 RenderHeight;
     
@@ -237,19 +227,11 @@ struct ui_state
     u32 MaxNumScrollMenus;
     u32 NumScrollMenus;
     ui_scroll_menu_saved_state ScrollMenuSave;
-
-    u32 MaxNumFadeImages;
-    u32 NumFadeImages;
-    ui_fade_image_saved_state* FadeImageSave;
-
-    u32 MaxNumFadeText;
-    u32 NumFadeText;
-    ui_fade_text_saved_state* FadeTextSave;
     
     // NOTE: Render data
     u32 MaxNumClipRects;
     ui_textured_rect_job TexturedRectJob;
-
+    
     // TODO: Add support for multiple fonts
     u32 MaxNumGlyphs;
     ui_glyph_job GlyphJob;
@@ -275,3 +257,5 @@ inline void UiScrollMenu(ui_state* UiState, ui_constraint Constraint, u32 FontId
                          f32 SliderWidth, u32 NumOptions, char** Options);
 inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 ButtonBounds, f32 TextPad,
                        f32 SliderWidth, u32 NumOptions, u32 MaxNumShownOptions, char** Options, u32* ChosenOption);
+
+#include "ui.cpp"
