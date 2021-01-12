@@ -9,16 +9,205 @@
 #define UI_FILE_LINE_ID() ((u64)(__FILE__) + (u64)(__LINE__))
 
 //
-// NOTE: Ui Render Functions
+// NOTE: Ui State Functions
 //
 
-inline f32 UiGetZ(ui_state* UiState)
+inline ui_state UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena* TempArena, vk_linear_arena* GpuArena,
+                              vk_descriptor_manager* DescriptorManager, vk_pipeline_manager* PipelineManager, VkBuffer QuadVertices,
+                              VkBuffer QuadIndices, VkRenderPass RenderPass, u32 SubPassId)
+{
+    ui_state Result = {};
+    Result.StepZ = 1.0f / 4096.0f;
+    Result.CurrZ = 0.0f;
+
+    Result.QuadVertices = QuadVertices;
+    Result.QuadIndices = QuadIndices;
+
+    // NOTE: Ui Descriptor Set
+    {
+        VkDescriptorPoolSize Pools[1] = {};
+        Pools[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        Pools[0].descriptorCount = 1;
+            
+        VkDescriptorPoolCreateInfo CreateInfo = {};
+        CreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        CreateInfo.maxSets = 1;
+        CreateInfo.poolSizeCount = ArrayCount(Pools);
+        CreateInfo.pPoolSizes = Pools;
+        VkCheckResult(vkCreateDescriptorPool(Device, &CreateInfo, 0, &Result.DescriptorPool));
+
+        vk_descriptor_layout_builder Builder = VkDescriptorLayoutBegin(&Result.UiDescLayout);
+        VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+        VkDescriptorLayoutEnd(Device, &Builder);
+
+        Result.UiDescriptor = VkDescriptorSetAllocate(Device, Result.DescriptorPool, Result.UiDescLayout);
+    }
+    
+    // NOTE: Rect Data
+    {
+        Result.MaxNumRects = 1000;
+        Result.RectArray = PushArray(CpuArena, ui_rect, Result.MaxNumRects);
+        Result.GpuRectBuffer = VkBufferCreate(Device, GpuArena, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                              sizeof(gpu_ui_rect) * Result.MaxNumRects);
+        VkDescriptorBufferWrite(DescriptorManager, Result.UiDescriptor, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, Result.GpuRectBuffer);
+
+        vk_pipeline_builder Builder = VkPipelineBuilderBegin(TempArena);
+
+        // NOTE: Shaders
+        VkPipelineShaderAdd(&Builder, "..\\libs\\ui\\ui_rect_vert.spv", "main", VK_SHADER_STAGE_VERTEX_BIT);
+        VkPipelineShaderAdd(&Builder, "..\\libs\\ui\\ui_rect_frag.spv", "main", VK_SHADER_STAGE_FRAGMENT_BIT);
+                
+        // NOTE: Specify input vertex data format
+        VkPipelineVertexBindingBegin(&Builder);
+        VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32B32_SFLOAT, sizeof(v3));
+        VkPipelineVertexAttributeAddOffset(&Builder, sizeof(v3) + sizeof(v2));
+        VkPipelineVertexBindingEnd(&Builder);
+
+        VkPipelineInputAssemblyAdd(&Builder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
+        VkPipelineDepthStateAdd(&Builder, VK_TRUE, VK_TRUE, VK_COMPARE_OP_GREATER);
+
+        VkPipelineColorAttachmentAdd(&Builder, VK_FALSE, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
+                                     VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO);
+
+        VkDescriptorSetLayout DescriptorLayouts[] =
+            {
+                Result.UiDescLayout,
+            };
+            
+        Result.RectPipeline = VkPipelineBuilderEnd(&Builder, Device, PipelineManager, RenderPass, 0, DescriptorLayouts,
+                                                   ArrayCount(DescriptorLayouts));
+    }
+
+    VkDescriptorManagerFlush(Device, DescriptorManager);
+    
+    return Result;
+}
+
+inline void UiStateBegin(ui_state* UiState, u32 RenderWidth, u32 RenderHeight)
+{
+    UiState->RenderWidth = RenderWidth;
+    UiState->RenderHeight = RenderHeight;
+    
+    // NOTE: Reset our values since we are immediate mode
+    UiState->CurrZ = 0.0f;
+    UiState->NumRects = 0;
+}
+
+inline void UiStateEnd(ui_state* UiState)
+{
+    if (UiState->NumRects > 0)
+    {
+        gpu_ui_rect* GpuData = VkTransferPushWriteArray(&RenderState->TransferManager, UiState->GpuRectBuffer, gpu_ui_rect, UiState->NumRects,
+                                                        BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT),
+                                                        BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+
+        v2 InvResolution = V2(1.0f) / V2(UiState->RenderWidth, UiState->RenderHeight);
+        for (uint RectId = 0; RectId < UiState->NumRects; ++RectId)
+        {
+            ui_rect* CurrRect = UiState->RectArray + RectId;
+
+            gpu_ui_rect* GpuRect = GpuData + RectId;
+            // NOTE: Normalize the rect to be in 0-1 range, x points right, y points up
+            GpuRect->Center = AabbGetCenter(CurrRect->Bounds) * InvResolution;
+            GpuRect->Center.y = 1.0f - GpuRect->Center.y;
+            GpuRect->Radius = AabbGetRadius(CurrRect->Bounds) * InvResolution;
+
+            GpuRect->Z = CurrRect->Z;
+            GpuRect->Color = PreMulAlpha(CurrRect->Color);
+        }
+    }
+}
+
+inline void UiStateRender(ui_state* UiState, vk_commands Commands)
+{
+    vkCmdBindPipeline(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UiState->RectPipeline->Handle);
+    VkDescriptorSet DescriptorSets[] =
+        {
+            UiState->UiDescriptor,
+        };
+    vkCmdBindDescriptorSets(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UiState->RectPipeline->Layout, 0,
+                            ArrayCount(DescriptorSets), DescriptorSets, 0, 0);
+        
+    VkDeviceSize Offset = 0;
+    vkCmdBindVertexBuffers(Commands.Buffer, 0, 1, &UiState->QuadVertices, &Offset);
+    vkCmdBindIndexBuffer(Commands.Buffer, UiState->QuadIndices, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(Commands.Buffer, 6, UiState->NumRects, 0, 0, 0);
+}
+
+//
+// NOTE: Ui Helpers
+//
+
+inline f32 UiStateGetZ(ui_state* UiState)
 {
     f32 Result = UiState->CurrZ;
     UiState->CurrZ += UiState->StepZ;
 
     return Result;
 }
+
+#if 0
+inline ui_button_interaction UiProcessElement(ui_state* UiState, aabb2 Bounds, interaction_ref Ref)
+{
+    // IMPORTANT: We assume pixel space coords
+    // NOTE: Check if we add a element interaction
+    Assert(!(Flags & UiElementFlag_DontCheckHover));
+    b32 Intersects = UiHandleOverlap(UiState, Bounds, Flags);
+    if (Intersects)
+    {
+        interaction Interaction = {};
+        Interaction.Type = Interaction_Button;
+        Interaction.Ref = Ref;        
+        InputAddInteraction(InputState, Interaction);
+    }
+
+    // NOTE: Check ui button interaction from last frame
+    ui_button_interaction Result = UiButtonInteraction_None;
+    if (InputInteractionsAreSame(Ref, InputState->PrevHot.Ref))
+    {
+        Result = InputState->PrevHot.Button;
+    }
+
+    return Result;
+}
+#endif
+
+inline void UiPushRect(ui_state* UiState, aabb2 Bounds, v4 Color)
+{
+    ui_rect* CurrRect = UiState->RectArray + UiState->NumRects++;
+    CurrRect->Bounds = Bounds;
+    CurrRect->Z = UiStateGetZ(UiState);
+    CurrRect->Color = Color;
+}
+
+//
+// NOTE: Ui Elements
+//
+
+#define UiButton(UiState, Bounds, Color) UiButton_(UiState, Bounds, Color, (u32)UI_FILE_LINE_ID())
+inline ui_interaction UiButton_(ui_state* State, aabb2 Bounds, v4 Color, u32 RefId)
+{
+    // IMPORTANT: Bounds are in pixel coord space
+    Assert(Bounds.Min.x < Bounds.Max.x);
+    Assert(Bounds.Min.y < Bounds.Max.y);
+    
+    //ui_button_interaction Result = UiProcessElement(State, Bounds, UiElementRef(UiType_Button, RefId));
+    ui_interaction Result = {};
+
+    UiPushRect(State, Bounds, Color);
+    
+    return Result;
+}
+
+//
+// =======================================================================================================================================
+//
+
+#if 0
+
+//
+// NOTE: Ui Render Functions
+//
 
 inline void UiSetTexturedRectClipRect(ui_state* UiState, aabb2i Bounds, b32 IsReset)
 {
@@ -66,40 +255,6 @@ inline void UiSetGlyphClipRect(ui_state* UiState, aabb2i Bounds, b32 IsReset = f
 inline void UiResetGlyphClipRect(ui_state* UiState)
 {
     UiSetGlyphClipRect(UiState, AabbiMinMax(V2i(0, 0), V2i(UiState->RenderWidth, UiState->RenderHeight)), true);
-}
-
-inline void UiPushTexture(ui_state* UiState, aabb2 Bounds, asset_texture_id TextureId, v4 TintColor)
-{
-    ui_textured_rect_job* Job = &UiState->TexturedRectJob;
-
-    // NOTE: Record total number of textured rects
-    u32 SubIndex = Job->NumTexturedRects & (4 - 1);
-    Job->NumTexturedRects += 1;
-
-    block_list_block* Block = Job->Sentinel.Prev;
-
-    // NOTE: Get the textured rect x4 that we will be using
-    ui_textured_rect_x4* TexturedRect = 0;
-    if (SubIndex == 0)
-    {
-        TexturedRect = BlockListAddEntryAligned(UiState->BlockArena, &Job->Sentinel, ui_textured_rect_x4, 16);
-    }
-    else
-    {
-        TexturedRect = (ui_textured_rect_x4*)Block->Data + Block->NumEntries - 1;
-    }
-
-    // NOTE: Count number of textured rects affected by clip rect
-    Job->ClipRectArray[Job->NumClipRects - 1].NumAffected += 1;
-
-    aabb2 NormalizedBounds = {};
-    NormalizedBounds.Min = Bounds.Min / V2(UiState->RenderWidth, UiState->RenderHeight);
-    NormalizedBounds.Max = Bounds.Max / V2(UiState->RenderWidth, UiState->RenderHeight);
-
-    WriteScalar(&TexturedRect->Bounds, SubIndex, NormalizedBounds);
-    WriteScalar(&TexturedRect->Z, SubIndex, UiGetZ(UiState));
-    WriteScalar(&TexturedRect->TextureId, SubIndex, TextureId.All);
-    WriteScalar(&TexturedRect->TintColor, SubIndex, TintColor);
 }
 
 //
@@ -933,8 +1088,7 @@ inline void UiVerticalSlider(ui_state* UiState, ui_constraint Constraint, aabb2 
 // NOTE: UiState Functions
 //
 
-inline void UiStateCreate(ui_state* UiState, linear_arena* Arena, block_arena* BlockArena, input_state* InputState, assets* Assets,
-                          render_state* RenderState)
+inline ui_state UiStateCreate()
 {
     *UiState = {};
     UiState->BlockArena = BlockArena;
@@ -1218,4 +1372,6 @@ INPUT_INTERACTION_HANDLER(UiInteractionHandler)
 
     return Result;
 }
+#endif
+
 #endif

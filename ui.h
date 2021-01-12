@@ -11,9 +11,76 @@
 #include "math\math.h"
 #include "memory\memory.h"
 
-//
-// TODO: FIX
-//
+/* TODO: Memory Stuff
+
+   TODO: We want to be able to suballocate this arena into blocks and share it amongst different allocators. Write up the
+   block arena to do that and then we just store a dynamic arena as the parent. Maybe in that case call this a platform_arena
+   since it actually goes through the platform to allocate
+
+   TODO: Make GPU arenas expandable by either recreating the whole thing (resizeable array) or linked list of memory blocks. This will work
+   well with above move to making CPU arena dynamic
+*/
+
+enum ui_interaction
+{
+    UiInteraction_None,
+
+    UiInteraction_Hover,
+    UiInteraction_Selected,
+    UiInteraction_Released,
+};
+
+struct ui_rect
+{
+    aabb2 Bounds;
+    f32 Z;
+    v4 Color;
+};
+
+struct gpu_ui_rect
+{
+    v2 Center;
+    v2 Radius;
+    f32 Z;
+    u32 Pad[3];
+    v4 Color;
+};
+
+struct ui_frame_input
+{
+    
+};
+
+struct ui_state
+{
+    // NOTE: For making sure ui gets rendered in submission order
+    f32 CurrZ;
+    f32 StepZ;
+    
+    u32 RenderWidth;
+    u32 RenderHeight;
+
+    VkDescriptorPool DescriptorPool;
+    VkDescriptorSetLayout UiDescLayout;
+    VkDescriptorSet UiDescriptor;
+    
+    // NOTE: Input data
+    b32 MouseTouchingUi;
+    b32 ProcessedInteraction;
+    
+    // NOTE: Render Rect Data
+    u32 MaxNumRects; // TODO: Add GPU buffers that are dynamic to get rid of this
+    u32 NumRects;
+    ui_rect* RectArray;
+    VkBuffer QuadVertices;
+    VkBuffer QuadIndices;
+    VkBuffer GpuRectBuffer;
+    vk_pipeline* RectPipeline;
+};
+
+#include "ui.cpp"
+
+#if 0
 
 struct asset_texture_id
 {
@@ -89,15 +156,6 @@ enum ui_type
     UiType_HorizontalSlider,
     UiType_VerticalSlider,
     UiType_DragF32,
-};
-
-enum ui_element_interaction
-{
-    UiElementInteraction_None,
-
-    UiElementInteraction_Hover,
-    UiElementInteraction_Selected,
-    UiElementInteraction_Released,
 };
 
 struct ui_slider_interaction
@@ -198,12 +256,9 @@ struct ui_glyph_job
     v4_soa Color;
 };
 
-// TODO: Store linked list of arrays for each ui element type and keep it in soa format?
-// Then you can allocate 4kb arrays of every type and remove some of the switch statements
-struct input_state;
 struct ui_state
 {
-    block_arena* BlockArena;
+    dynamic_arena Arena;
     
     i32 RenderWidth;
     i32 RenderHeight;
@@ -258,4 +313,4 @@ inline void UiScrollMenu(ui_state* UiState, ui_constraint Constraint, u32 FontId
 inline void UiDropDown(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 ButtonBounds, f32 TextPad,
                        f32 SliderWidth, u32 NumOptions, u32 MaxNumShownOptions, char** Options, u32* ChosenOption);
 
-#include "ui.cpp"
+#endif
