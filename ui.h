@@ -21,23 +21,11 @@
    well with above move to making CPU arena dynamic
 */
 
-enum ui_interaction
-{
-    UiInteraction_None,
+//
+// NOTE: Render Data
+//
 
-    UiInteraction_Hover,
-    UiInteraction_Selected,
-    UiInteraction_Released,
-};
-
-struct ui_rect
-{
-    aabb2 Bounds;
-    f32 Z;
-    v4 Color;
-};
-
-struct gpu_ui_rect
+struct ui_render_rect
 {
     v2 Center;
     v2 Radius;
@@ -46,20 +34,129 @@ struct gpu_ui_rect
     v4 Color;
 };
 
+struct ui_render_glyph
+{
+    char GlyphOffset;
+    f32 Z;
+    v2 Center;
+    v2 Radius;
+    v4 Color;
+};
+
+struct ui_render_glyph_gpu
+{
+    v2 Center;
+    v2 Radius;
+    v2 MinUv;
+    v2 MaxUv;
+    v4 Color;
+    f32 Z;
+    u8 Pad[3];
+};
+
+//
+// NOTE: Font
+//
+
+struct ui_glyph
+{
+    v2 Dim;
+    // NOTE: How we align the glyph along the line of text
+    v2 AlignPos;
+    f32 StepX;
+    v2 MinUv;
+    v2 MaxUv;
+};
+
+struct ui_font
+{
+    // TODO: Merge into ui_state?
+    // NOTE: Vertical font data    
+    f32 MaxAscent;
+    f32 MaxDescent;
+    f32 LineGap;
+
+    f32* KernArray;
+    ui_glyph* GlyphArray;
+    vk_image Atlas;
+    VkSampler AtlasSampler;
+};
+
+//
+// NOTE: Input
+//
+
+enum ui_mouse_flags
+{
+    UiMouseFlags_PressedOrHeld = 1 << 0,
+    UiMouseFlags_Pressed = 1 << 1,
+    UiMouseFlags_Released = 1 << 2,
+    UiMouseFlags_HeldOrReleased = 1 << 3,
+};
+
 struct ui_frame_input
 {
+    b32 MouseDown;
+    v2 MousePixelPos;
+    f32 MouseScroll;
     
+    // NOTE: Keyboard input
+    b32 KeysDown[255];
+};
+
+enum ui_interaction_type
+{
+    UiInteractionType_None,
+
+    UiInteractionType_Hover,
+    UiInteractionType_Selected,
+    UiInteractionType_Released,
+};
+
+enum ui_element_type
+{
+    UiElementType_None,
+    
+    UiElementType_Button,
+    UiElementType_HorizontalSlider,
+};
+
+struct ui_slider_interaction
+{
+    aabb2 Bounds;
+    f32* Percent;
+};
+
+struct ui_interaction
+{
+    ui_element_type Type;
+    u64 Hash;
+
+    union
+    {
+        ui_interaction_type Button;
+        ui_slider_interaction Slider;
+    };
 };
 
 struct ui_state
 {
+    vk_linear_arena GpuArena;
+    vk_temp_mem GpuTempMem;
+
+    // NOTE: Font data
+    ui_font Font;
+    
     // NOTE: For making sure ui gets rendered in submission order
     f32 CurrZ;
     f32 StepZ;
     
     u32 RenderWidth;
     u32 RenderHeight;
-
+    vk_image DepthImage;
+    VkFramebuffer FrameBuffer;
+    VkRenderPass RenderPass;
+    
     VkDescriptorPool DescriptorPool;
     VkDescriptorSetLayout UiDescLayout;
     VkDescriptorSet UiDescriptor;
@@ -67,15 +164,29 @@ struct ui_state
     // NOTE: Input data
     b32 MouseTouchingUi;
     b32 ProcessedInteraction;
+    u32 MouseFlags;
+    ui_frame_input CurrInput;
+    ui_frame_input PrevInput;
+    ui_interaction Hot;
+    ui_interaction PrevHot;
+
+    // NOTE: General Render Data
+    VkBuffer QuadVertices;
+    VkBuffer QuadIndices;
     
     // NOTE: Render Rect Data
     u32 MaxNumRects; // TODO: Add GPU buffers that are dynamic to get rid of this
     u32 NumRects;
-    ui_rect* RectArray;
-    VkBuffer QuadVertices;
-    VkBuffer QuadIndices;
+    ui_render_rect* RectArray;
     VkBuffer GpuRectBuffer;
     vk_pipeline* RectPipeline;
+
+    // NOTE: Render Glyph Data
+    u32 MaxNumGlyphs; // TODO: Add GPU buffers that are dynamic to get rid of this
+    u32 NumGlyphs;
+    ui_render_glyph* GlyphArray;
+    VkBuffer GpuGlyphBuffer;
+    vk_pipeline* GlyphPipeline;
 };
 
 #include "ui.cpp"
