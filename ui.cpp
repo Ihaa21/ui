@@ -330,7 +330,7 @@ inline void UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena*
         VkPipelineVertexBindingEnd(&Builder);
 
         VkPipelineInputAssemblyAdd(&Builder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
-        VkPipelineDepthStateAdd(&Builder, VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS);
+        VkPipelineDepthStateAdd(&Builder, VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS);
 
         VkPipelineColorAttachmentAdd(&Builder, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
                                      VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO);
@@ -434,6 +434,25 @@ inline void UiStateEnd(ui_state* UiState)
                     UiState->PrevHot = UiState->Hot;
                 }
             } break;
+
+            case UiElementType_DraggableBox:
+            {
+                ui_drag_box_interaction DragBox = Hot->DragBox;
+
+                if (CurrInput->MouseDown)
+                {
+                    *DragBox.TopLeftPos = CurrInput->MousePixelPos + DragBox.MouseRelativePos;
+                    UiState->PrevHot = UiState->Hot;
+                }
+            } break;
+
+            case UiElementType_Image:
+            {
+                if (CurrInput->MouseDown)
+                {
+                    UiState->PrevHot = UiState->Hot;
+                }
+            } break;
             
             default:
             {
@@ -476,12 +495,13 @@ inline void UiStateEnd(ui_state* UiState)
                                                                 BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT),
                                                                 BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
 
+        // NOTE: Loop back to front so reverse order (we want to render back to front)
         v2 InvResolution = V2(1.0f) / V2(UiState->RenderWidth, UiState->RenderHeight);
         for (uint GlyphId = 0; GlyphId < UiState->NumGlyphs; ++GlyphId)
         {
             ui_render_glyph* CurrGlyph = UiState->GlyphArray + GlyphId;
 
-            ui_render_glyph_gpu* GpuGlyph = GpuData + GlyphId;
+            ui_render_glyph_gpu* GpuGlyph = GpuData + (UiState->NumGlyphs - GlyphId - 1);
             // NOTE: Normalize the glyph to be in 0-1 range, x points right, y points up
             GpuGlyph->Center = CurrGlyph->Center * InvResolution;
             GpuGlyph->Center.y = 1.0f - GpuGlyph->Center.y;
@@ -585,16 +605,23 @@ inline f32 UiStateGetZ(ui_state* UiState)
 inline void UiStateAddInteraction(ui_state* UiState, ui_interaction Interaction)
 {
     // NOTE: Z value decreases so we start with front most stuff first, so we don't have to check Z here
-    // NOTE: Set priority on which interactions should be saved
-    if ((UiState->Hot.Type == UiElementType_Button && UiInteractionsAreSame(UiState->Hot, UiState->PrevHot)) ||
-        (UiState->Hot.Type == UiElementType_HorizontalSlider && UiInteractionsAreSame(UiState->Hot, UiState->PrevHot)))
-    {
-        // NOTE: If we are interacting with the element, keep interacting and don't overwrite it
-    }
-    else
+    if (UiState->Hot.Type == UiElementType_None)
     {
         UiState->Hot = Interaction;
         UiState->ProcessedInteraction = true;
+    }
+    else
+    {
+        // NOTE: Below interactions keep interacting so they get priority
+        if (UiInteractionsAreSame(Interaction, UiState->PrevHot) &&
+            (UiState->Hot.Type == UiElementType_Button ||
+             UiState->Hot.Type == UiElementType_HorizontalSlider || 
+             UiState->Hot.Type == UiElementType_DraggableBox ||
+             UiState->Hot.Type == UiElementType_Image))
+        {
+            UiState->Hot = Interaction;
+            UiState->ProcessedInteraction = true;
+        }
     }
 }
 
@@ -662,31 +689,30 @@ inline void UiStatePushGlyph(ui_state* UiState, char Glyph, f32 Z, aabb2 Bounds,
     CurrGlyph->Color = Color;
 }
 
-inline void UiStatePushText(ui_state* UiState, f32 CharHeight, v2 TopLeftTextPos, f32 SentenceWidth, char* Text, v4 TintColor)
+inline f32 UiFontGetLineAdvance(ui_font* Font, f32 CharHeight)
 {
-#if 0
-    // TODO: Floats seem to fail for me at higher resolutions and so we get text that displays slightly different at larger resolutions.
-    // It might not be a issue but we can fix this by doing all the math in fixed point, or normalizing to working closer to 0, and then
-    // offset only for displaying.
+    f32 Result = -CharHeight*(Font->MaxAscent - Font->MaxDescent + Font->LineGap);
+    return Result;
+}
 
+inline f32 UiFontGetStartY(ui_font* Font, f32 MinY, f32 MaxY)
+{
+    f32 CharHeight = MaxY - MinY;
+    f32 StartY = MaxY - CharHeight*(Font->MaxAscent);
+
+    return StartY;
+}
+
+inline aabb2 UiStateGetTextSizeNoFormat(ui_state* UiState, f32 MaxCharHeight, char* Text)
+{
+    // IMPORTANT: This outputs the bounds centered around (0, 0) for easier translation
+    aabb2 Result = {};
+    
     // NOTE: https://github.com/justinmeiners/stb-truetype-example/blob/master/source/main.c
-    // TODO: Add constraints to text and text properties like centered
+    ui_font* Font = &UiState->Font;
 
-    // NOTE: If we don't have a sentence width, don't apply it
-    if (SentenceWidth == 0)
-    {
-        SentenceWidth = INT32_MAX;
-    }
-
-    ui_font* Font = UiState->FontArray + FontId;
-    f32 FrontTextZ = UiStateGetZ(UiState);
-    f32 BackTextZ = UiStateGetZ(UiState);
-
-    // NOTE: Calculate our text start pos on the line
-    v2 StartPos = UiApplyConstraint(UiState, Constraint, TopLeftTextPos);
-    StartPos = V2(StartPos.x, StartPos.y - CharHeight*(Font->MaxAscent));
-
-    // NOTE: We walk our glyphs using floats and round when we generate glyphs to render
+    // NOTE: We start at (0, 0) and record left to right, and downwards for our text bounds
+    v2 StartPos = V2(0.0f);
     v2 CurrPos = StartPos;
     char PrevGlyph = 0;
     char CurrGlyph = 0;
@@ -694,88 +720,107 @@ inline void UiStatePushText(ui_state* UiState, f32 CharHeight, v2 TopLeftTextPos
     {
         CurrGlyph = *Text;
 
-        file_glyph* Glyph = Font->GlyphArray + CurrGlyph - Font->MinGlyph;
+        ui_glyph* Glyph = Font->GlyphArray + CurrGlyph;
         f32 Kerning = 0.0f;
-        f32 ScaledStepX = CharHeight*Glyph->StepX;
+        f32 ScaledStepX = MaxCharHeight*Glyph->StepX;
         b32 StartNewLine = CurrGlyph == '\n';
-        if (!StartNewLine)
+        if (!StartNewLine && PrevGlyph != 0)
         {
-            // NOTE: Check if we have enough space on the current line to draw the next glyph
-            Assert(CurrGlyph >= (char)Font->MinGlyph && CurrGlyph < (char)Font->MaxGlyph);
-            if (PrevGlyph != 0)
-            {
-                u32 NumGlyphs = Font->MaxGlyph - Font->MinGlyph;
-                Kerning = CharHeight*Font->KernArray[(CurrGlyph - Font->MinGlyph)*NumGlyphs + (PrevGlyph - Font->MinGlyph)];
-            }
-        
-            StartNewLine = ((CurrPos.x + Kerning + ScaledStepX - StartPos.x) > SentenceWidth);
+            Kerning = MaxCharHeight*Font->KernArray[CurrGlyph*255 + PrevGlyph];
         }
         
         if (StartNewLine)
         {
-            CurrPos.y += UiTextGetLineAdvance(UiState, Font, CharHeight);
+            // NOTE: Remember the width for this line when calculating our bounds
+            Result.Max.x = Max(Result.Max.x, CurrPos.x);
+            
+            CurrPos.y -= MaxCharHeight * (1.0f + Font->LineGap);
             CurrPos.x = StartPos.x;
             PrevGlyph = 0;
-            if (CurrGlyph == '\n')
-            {
-                Text += 1;
-            }
-            
-            // NOTE: Don't start with spaces on a new line
-            while (CurrGlyph == ' ')
-            {
-                Text += 1;
-                CurrGlyph = *Text;
-            }
+            Text += 1;
 
             continue;
         }
 
-        // NOTE: We have enough space for the glyph, apply kerning
-        CurrPos.x += Kerning;
+        // NOTE: Apply kerning and step
+        CurrPos.x += Kerning + ScaledStepX;
+        PrevGlyph = CurrGlyph;
+        ++Text;
+    }
+
+    // NOTE: Remember the width of the last line when calculating bounds
+    Result.Max.x = Max(Result.Max.x, CurrPos.x);
+    // NOTE: Make bot left 0, 0
+    Result.Max.y = -CurrPos.y + MaxCharHeight; 
+    // NOTE: Recenter our text so that (0, 0) is in the middle
+    Result = Translate(Result, -AabbGetRadius(Result));
+
+    return Result;
+}
+
+inline void UiStatePushTextNoFormat(ui_state* UiState, v2 TopLeftTextPos, f32 MaxCharHeight, char* Text, v4 TintColor)
+{
+    // NOTE: https://github.com/justinmeiners/stb-truetype-example/blob/master/source/main.c
+    ui_font* Font = &UiState->Font;
+    f32 FrontTextZ = UiStateGetZ(UiState);
+    f32 BackTextZ = UiStateGetZ(UiState);
+
+    // NOTE: Calculate our text start pos on the line
+    v2 StartPos = V2(TopLeftTextPos.x, TopLeftTextPos.y - MaxCharHeight*(Font->MaxAscent));
+
+    v2 CurrPos = StartPos;
+    char PrevGlyph = 0;
+    char CurrGlyph = 0;
+    while (*Text)
+    {
+        CurrGlyph = *Text;
+
+        ui_glyph* Glyph = Font->GlyphArray + CurrGlyph;
+        f32 Kerning = 0.0f;
+        f32 ScaledStepX = MaxCharHeight*Glyph->StepX;
+        b32 StartNewLine = CurrGlyph == '\n';
+        if (!StartNewLine && PrevGlyph != 0)
+        {
+            Kerning = MaxCharHeight*Font->KernArray[CurrGlyph*255 + PrevGlyph];
+        }
         
+        if (StartNewLine)
+        {
+            CurrPos.y += UiFontGetLineAdvance(Font, MaxCharHeight);
+            CurrPos.x = StartPos.x;
+            PrevGlyph = 0;
+            Text += 1;
+
+            continue;
+        }
+
+        // NOTE: Apply kerning
+        CurrPos.x += Kerning;
         if (CurrGlyph != ' ')
         {
-            char GlyphOffset = CurrGlyph - Font->MinGlyph;
-
             // NOTE: Glyph dim will be the aabb size, but we offset by align pos since some chars like 'p'
             // need to be descend a bit
-            v2 CharDim = Glyph->Dim * CharHeight;
+            v2 CharDim = Glyph->Dim * MaxCharHeight;
             aabb2 GlyphBounds = AabbMinMax(V2(0, 0), CharDim);
-            GlyphBounds = Translate(GlyphBounds, CurrPos + CharHeight*Glyph->AlignPos);
+            GlyphBounds = Translate(GlyphBounds, CurrPos + MaxCharHeight*Glyph->AlignPos);
 
+            UiStatePushGlyph(UiState, CurrGlyph, FrontTextZ, GlyphBounds, TintColor);
             // NOTE: Store black version of glyph behind white version
-            UiStatePushGlyph(UiState, GlyphOffset, FrontTextZ, GlyphBounds, V4(TintColor));
-            UiStatePushGlyph(UiState, GlyphOffset, FrontTextZ, GlyphBounds, V4(0, 0, 0, 1));
+            //UiStatePushGlyph(UiState, CurrGlyph, FrontTextZ, Translate(Enlarge(GlyphBounds, V2(2)), V2(2, -1)), V4(0, 0, 0, 1));
         }
         
         CurrPos.x += ScaledStepX;
         PrevGlyph = CurrGlyph;
         ++Text;
     }
-#endif
 }
 
-/*
-inline void UiStatePushText(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 Bounds, f32 CharHeight, char* Text, v4 TintColor)
+inline void UiStatePushTextNoFormat(ui_state* UiState, aabb2 Bounds, f32 MaxCharHeight, char* Text, v4 TintColor)
 {
     v2 BoundsDim = AabbGetDim(Bounds);
-    f32 SentenceWidth = BoundsDim.x;
     v2 TopLeftTextPos = V2(Bounds.Min.x, Bounds.Max.y);
-    
-    UiText(UiState, Constraint, FontId, CharHeight, TopLeftTextPos, SentenceWidth, Text, TintColor);
+    UiStatePushTextNoFormat(UiState, TopLeftTextPos, MaxCharHeight, Text, TintColor);
 }
-
-inline void UiStatePushText(ui_state* UiState, ui_constraint Constraint, u32 FontId, aabb2 Bounds, char* Text, v4 TintColor)
-{
-    v2 BoundsDim = AabbGetDim(Bounds);
-    f32 SentenceWidth = BoundsDim.x;
-    f32 CharHeight = BoundsDim.y;
-    v2 TopLeftTextPos = V2(Bounds.Min.x, Bounds.Max.y);
-    
-    UiText(UiState, Constraint, FontId, CharHeight, TopLeftTextPos, SentenceWidth, Text, TintColor);
-}
-*/
 
 //
 // NOTE: Ui Elements
@@ -816,7 +861,45 @@ inline b32 UiButtonAnimated_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 Hash
             DrawBounds = Enlarge(DrawBounds, V2(-3));
         } break;
     }
+
+    UiStatePushRect(UiState, DrawBounds, Color);
+
+    b32 Result = Interaction == UiInteractionType_Released;
+    return Result;
+}
+
+#define UiButtonText(UiState, Bounds, MaxCharHeight, Text, Color) UiButtonText_(UiState, Bounds, MaxCharHeight, Text, Color, (u32)(UI_FILE_LINE_ID() + uintptr_t(Text)))
+inline b32 UiButtonText_(ui_state* UiState, aabb2 Bounds, f32 MaxCharHeight, char* Text, v4 Color, u32 Hash)
+{
+    // IMPORTANT: Bounds are in pixel coord space
+    Assert(Bounds.Min.x < Bounds.Max.x);
+    Assert(Bounds.Min.y < Bounds.Max.y);
     
+    ui_interaction_type Interaction = UiStateProcessElement(UiState, Bounds, UiElementHash(UiElementType_Button, Hash));
+    
+    v4 TextColor = V4(1);
+    aabb2 DrawBounds = Bounds;
+    switch(Interaction)
+    {
+        case UiInteractionType_Hover:
+        {
+            TextColor.rgb = V3(0.7f, 0.7f, 0.3f);
+        } break;
+
+        case UiInteractionType_Selected:
+        {
+            TextColor.rgb = V3(0.9f, 0.9f, 0.1f);
+            DrawBounds = Enlarge(DrawBounds, V2(-3));
+            MaxCharHeight -= 1.0f;
+        } break;
+    }
+
+    // NOTE: Center the text to the button
+    aabb2 TextBounds = UiStateGetTextSizeNoFormat(UiState, MaxCharHeight, Text);
+    TextBounds = Translate(TextBounds, AabbGetCenter(DrawBounds));
+
+    UiStatePushTextNoFormat(UiState, TextBounds, MaxCharHeight, Text, TextColor);
+    UiStatePushRect(UiState, TextBounds, V4(1, 0, 0, 1));
     UiStatePushRect(UiState, DrawBounds, Color);
 
     b32 Result = Interaction == UiInteractionType_Released;
@@ -825,6 +908,8 @@ inline b32 UiButtonAnimated_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 Hash
 
 inline void UiHorizontalSlider(ui_state* UiState, aabb2 SliderBounds, v2 KnobRadius, f32* PercentValue)
 {
+    // TODO: Add ranges on the value
+    // TODO: Add text to write the number
     u64 Hash = UiElementHash(UiElementType_HorizontalSlider, u32(uintptr_t(PercentValue)));
     
     // NOTE: Generate all our collision bounds
@@ -852,14 +937,245 @@ inline void UiHorizontalSlider(ui_state* UiState, aabb2 SliderBounds, v2 KnobRad
 
     UiStatePushRectOutline(UiState, SliderKnob, V4(0.2f, 0.2f, 0.2f, 1.0f), 2);
     UiStatePushRect(UiState, SliderKnob, V4(0, 0, 0, 1));
-    UiStatePushRect(UiState, SliderBounds, V4(0.0f, 0.0f, 0.0f, 0.7f));
+    UiStatePushRect(UiState, SliderBounds, V4(0.0f, 0.0f, 0.0f, 1.0f));
 }
+
+inline void UiDragabbleBoxNoRender(ui_state* UiState, aabb2 Bounds, v2* TopLeftPos)
+{
+    u64 Hash = UiElementHash(UiElementType_DraggableBox, u32(uintptr_t(TopLeftPos)));
+    
+    ui_interaction Interaction = {};
+    Interaction.Type = UiElementType_DraggableBox;
+    Interaction.Hash = Hash;
+    Interaction.DragBox.TopLeftPos = TopLeftPos;
+    
+    if (UiIntersect(Bounds, UiState->CurrInput.MousePixelPos) && (UiState->MouseFlags & UiMouseFlags_Pressed))
+    {
+        Interaction.DragBox.MouseRelativePos = *TopLeftPos - UiState->CurrInput.MousePixelPos;
+        UiStateAddInteraction(UiState, Interaction);
+    }
+    else if (UiInteractionsAreSame(Hash, UiState->PrevHot.Hash) && (UiState->MouseFlags & UiMouseFlags_PressedOrHeld))
+    {
+        // NOTE: Sometimes mouse moves to fast but we know we are interacting with it so we only check for past interaction
+        Interaction.DragBox.MouseRelativePos = UiState->PrevHot.DragBox.MouseRelativePos;
+        UiStateAddInteraction(UiState, Interaction);
+    }
+}
+
+#define UiRect(UiState, Bounds, Color) UiRect_(UiState, Bounds, Color, (u32)(UI_FILE_LINE_ID()))
+inline void UiRect_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 InputHash)
+{
+    u64 Hash = UiElementHash(UiElementType_Image, InputHash);
+    
+    if ((UiIntersect(Bounds, UiState->CurrInput.MousePixelPos) || UiInteractionsAreSame(Hash, UiState->PrevHot.Hash)) &&
+        (UiState->MouseFlags & UiMouseFlags_PressedOrHeld))
+    {
+        ui_interaction Interaction = {};
+        Interaction.Type = UiElementType_Image;
+        Interaction.Hash = Hash;
+        UiStateAddInteraction(UiState, Interaction);
+    }
+
+    UiStatePushRect(UiState, Bounds, Color);
+}
+
+//
+// NOTE: Ui Panel
+//
+
+inline ui_panel UiPanelBegin(ui_state* UiState, v2* TopLeftPos, char* Name)
+{
+    ui_panel Result = {};
+    Result.UiState = UiState;
+    Result.TopLeftPos = TopLeftPos; // NOTE: Passed into input to be dragged around
+    Result.Name = Name;
+    
+    // NOTE: Set standard sized values
+    {
+        Result.KnobRadius = V2(20);
+        Result.SliderBounds = AabbCenterRadius(V2(100.0f, -Result.KnobRadius.y), V2(100, 5));
+
+        Result.MaxCharHeight = 40.0f;
+
+        // IMPORTANT: All bounds should be created such that top left is 0,0
+        Result.BorderGap = 15.0f;
+        Result.ElementGap = 10.0f;
+        Result.LineGap = 6.0f;
+        Result.TitleHeight = Result.MaxCharHeight + 4.0f;
+    }
+
+    // NOTE: Set building variables
+    {
+        Result.CurrPos = *TopLeftPos + V2(Result.BorderGap, -Result.BorderGap - Result.TitleHeight);
+    }
+
+    return Result;
+}
+
+inline void UiPanelNextRow(ui_panel* Panel)
+{
+    Panel->PanelMaxX = Max(Panel->PanelMaxX, Panel->CurrPos.x);
+    Panel->CurrPos.x = Panel->TopLeftPos->x + Panel->BorderGap;
+    Panel->CurrPos.y -= Panel->CurrRowMaxY + Panel->LineGap;
+    Panel->CurrRowMaxY = 0.0f;
+}
+
+inline void UiPanelEnd(ui_panel* Panel)
+{
+    // NOTE: Finis the row we are currently on
+    UiPanelNextRow(Panel);
+    // NOTE: Undo line gap since we don't have a new line beneath us
+    Panel->CurrPos.y += Panel->LineGap;
+    
+    aabb2 PanelBounds = {};
+    PanelBounds.Min.x = Panel->TopLeftPos->x;
+    PanelBounds.Min.y = Panel->CurrPos.y - Panel->BorderGap;
+    PanelBounds.Max.x = Panel->PanelMaxX + Panel->BorderGap;
+    PanelBounds.Max.y = Panel->TopLeftPos->y;
+
+    // NOTE: Title
+    {
+        aabb2 TitleBounds = {};
+        TitleBounds.Min.x = PanelBounds.Min.x;
+        TitleBounds.Min.y = PanelBounds.Max.y - Panel->TitleHeight;
+        TitleBounds.Max.x = PanelBounds.Max.x;
+        TitleBounds.Max.y = PanelBounds.Max.y;
+
+        // NOTE: Calculate interaction with the panel for dragging
+        UiDragabbleBoxNoRender(Panel->UiState, TitleBounds, Panel->TopLeftPos);
+
+        aabb2 TextBounds = UiStateGetTextSizeNoFormat(Panel->UiState, Panel->MaxCharHeight, Panel->Name);
+        TextBounds = Translate(TextBounds, AabbGetCenter(TitleBounds));
+
+        UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Panel->Name, V4(1));
+        UiRect(Panel->UiState, TitleBounds, V4(0.05f, 0.05f, 0.05f, 1.0f));
+    }
+
+    // NOTE: Background
+    UiStatePushRectOutline(Panel->UiState, PanelBounds, V4(0.0f, 0.0f, 0.0f, 1.0f), RoundToF32(Panel->BorderGap / 2.0f));
+    UiRect(Panel->UiState, PanelBounds, V4(0.1f, 0.4f, 0.7f, 1.0f));
+}
+
+inline void UiPanelHorizontalSlider(ui_panel* Panel, f32* PercentValue)
+{
+    aabb2 SliderBounds = Translate(Panel->SliderBounds, Panel->CurrPos);
+    UiHorizontalSlider(Panel->UiState, SliderBounds, Panel->KnobRadius, PercentValue);
+
+    // NOTE: Increment current position in panel
+    f32 MaxDimY = Max(AabbGetDim(SliderBounds).y, 2*Panel->KnobRadius.y);
+    Panel->CurrPos.x += AabbGetDim(SliderBounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, MaxDimY);
+}
+
+inline void UiPanelText(ui_panel* Panel, char* Text)
+{
+    aabb2 TextBounds = UiStateGetTextSizeNoFormat(Panel->UiState, Panel->MaxCharHeight, Text);
+    TextBounds = Translate(TextBounds, Panel->CurrPos + V2(1, -1) * AabbGetRadius(TextBounds));
+    UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Text, V4(1, 1, 1, 1));
+
+    Panel->CurrPos.x += AabbGetDim(TextBounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, AabbGetDim(TextBounds).y);
+}
+
+/*
+   TODO: Implement later
+inline void UiPanelButton(ui_panel* Panel)
+{
+}
+
+inline void UiPanelCheckMark(ui_panel* Panel)
+{
+}
+*/
 
 //
 // =======================================================================================================================================
 //
 
 #if 0
+
+inline void UiStatePushText(ui_state* UiState, f32 MaxCharHeight, v2 TopLeftTextPos, f32 MaxSentenceWidth, char* Text, v4 TintColor)
+{
+    // NOTE: https://github.com/justinmeiners/stb-truetype-example/blob/master/source/main.c
+    // TODO: Add constraints to text and text properties like centered
+
+    // NOTE: If we don't have a sentence width, don't apply it
+    if (MaxSentenceWidth == 0)
+    {
+        MaxSentenceWidth = INT32_MAX;
+    }
+
+    ui_font* Font = &UiState->Font;
+    f32 FrontTextZ = UiStateGetZ(UiState);
+    f32 BackTextZ = UiStateGetZ(UiState);
+
+    // NOTE: Calculate our text start pos on the line
+    v2 StartPos = V2(TopLeftTextPos.x, TopLeftTextPos.y - MaxCharHeight*(Font->MaxAscent));
+
+    // NOTE: We walk our glyphs using floats and round when we generate glyphs to render
+    v2 CurrPos = StartPos;
+    char PrevGlyph = 0;
+    char CurrGlyph = 0;
+    while (*Text)
+    {
+        CurrGlyph = *Text;
+
+        ui_glyph* Glyph = Font->GlyphArray + CurrGlyph;
+        f32 Kerning = 0.0f;
+        f32 ScaledStepX = MaxCharHeight*Glyph->StepX;
+        b32 StartNewLine = CurrGlyph == '\n';
+        if (!StartNewLine)
+        {
+            // NOTE: Check if we have enough space on the current line to draw the next glyph
+            if (PrevGlyph != 0)
+            {
+                Kerning = MaxCharHeight*Font->KernArray[CurrGlyph*255 + PrevGlyph];
+            }
+        
+            StartNewLine = ((CurrPos.x + Kerning + ScaledStepX - StartPos.x) > MaxSentenceWidth);
+        }
+        
+        if (StartNewLine)
+        {
+            CurrPos.y += UiFontGetLineAdvance(Font, MaxCharHeight);
+            CurrPos.x = StartPos.x;
+            PrevGlyph = 0;
+            if (CurrGlyph == '\n')
+            {
+                Text += 1;
+            }
+            
+            // NOTE: Don't start with spaces on a new line
+            while (CurrGlyph == ' ')
+            {
+                Text += 1;
+                CurrGlyph = *Text;
+            }
+
+            continue;
+        }
+
+        // NOTE: We have enough space for the glyph, apply kerning
+        CurrPos.x += Kerning;
+        
+        if (CurrGlyph != ' ')
+        {
+            // NOTE: Glyph dim will be the aabb size, but we offset by align pos since some chars like 'p'
+            // need to be descend a bit
+            v2 CharDim = Glyph->Dim * MaxCharHeight;
+            aabb2 GlyphBounds = AabbMinMax(V2(0, 0), CharDim);
+            GlyphBounds = Translate(GlyphBounds, CurrPos + MaxCharHeight*Glyph->AlignPos);
+
+            // NOTE: Store black version of glyph behind white version
+            UiStatePushGlyph(UiState, CurrGlyph, FrontTextZ, GlyphBounds, TintColor);
+            UiStatePushGlyph(UiState, CurrGlyph, FrontTextZ, GlyphBounds, V4(0, 0, 0, 1));
+        }
+        
+        CurrPos.x += ScaledStepX;
+        PrevGlyph = CurrGlyph;
+        ++Text;
+    }
+}
 
 //
 // NOTE: Ui Render Functions

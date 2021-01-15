@@ -51,7 +51,7 @@ struct ui_render_glyph_gpu
     v2 MaxUv;
     v4 Color;
     f32 Z;
-    u8 Pad[3];
+    u32 Pad[3];
 };
 
 //
@@ -78,8 +78,38 @@ struct ui_font
 
     f32* KernArray;
     ui_glyph* GlyphArray;
+    // TODO: Add mips
     vk_image Atlas;
     VkSampler AtlasSampler;
+};
+
+//
+// NOTE: Panel
+//
+
+struct ui_state;
+struct ui_panel
+{
+    ui_state* UiState;
+    v2* TopLeftPos;
+    char* Name;
+
+    // NOTE: Building variables
+    v2 CurrPos;
+    f32 PanelMaxX;
+    f32 CurrRowMaxY;
+
+    // NOTE: Standard sized values
+    aabb2 SliderBounds;
+    v2 KnobRadius;
+
+    f32 MaxCharHeight;
+        
+    f32 TitleHeight;
+    f32 BorderGap;
+    f32 ElementGap; // NOTE Gap in X between elements
+    f32 LineGap; // NOTE: Gap in Y between rows
+
 };
 
 //
@@ -119,12 +149,20 @@ enum ui_element_type
     
     UiElementType_Button,
     UiElementType_HorizontalSlider,
+    UiElementType_DraggableBox,
+    UiElementType_Image,
 };
 
 struct ui_slider_interaction
 {
     aabb2 Bounds;
     f32* Percent;
+};
+
+struct ui_drag_box_interaction
+{
+    v2* TopLeftPos;
+    v2 MouseRelativePos;
 };
 
 struct ui_interaction
@@ -136,6 +174,7 @@ struct ui_interaction
     {
         ui_interaction_type Button;
         ui_slider_interaction Slider;
+        ui_drag_box_interaction DragBox;
     };
 };
 
@@ -190,6 +229,10 @@ struct ui_state
 };
 
 #include "ui.cpp"
+
+//
+// ==========================================================================================================================================
+//
 
 #if 0
 
