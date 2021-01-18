@@ -25,6 +25,13 @@
 // NOTE: Render Data
 //
 
+struct ui_clip_rect
+{
+    aabb2i Bounds;
+    u32 NumRectsAffected;
+    u32 NumGlyphsAffected;
+};
+
 struct ui_render_rect
 {
     v2 Center;
@@ -116,12 +123,28 @@ struct ui_panel
 // NOTE: Input
 //
 
+#define UI_INPUT_KEY_WAIT_TIME 2.0f
+#define UI_MIN_KEY_SPAM_TIME 0.2f
+
+enum ui_button_flags
+{
+    UiKeyFlag_Down = 1 << 0,
+    UiKeyFlag_OutputInput = 1 << 1,
+};
+
+struct ui_input_key
+{
+    u32 Flags;
+    f32 TimeTillNextInput; // NOTE: When we notify the UI that the key is down
+};
+
 enum ui_mouse_flags
 {
-    UiMouseFlags_PressedOrHeld = 1 << 0,
-    UiMouseFlags_Pressed = 1 << 1,
-    UiMouseFlags_Released = 1 << 2,
-    UiMouseFlags_HeldOrReleased = 1 << 3,
+    UiMouseFlag_Pressed = 1 << 0,
+    UiMouseFlag_Held = 1 << 1,
+    UiMouseFlag_Released = 1 << 2,
+    UiMouseFlag_PressedOrHeld = 1 << 3,
+    UiMouseFlag_HeldOrReleased = 1 << 4,
 };
 
 struct ui_frame_input
@@ -131,8 +154,16 @@ struct ui_frame_input
     f32 MouseScroll;
     
     // NOTE: Keyboard input
-    b32 KeysDown[255];
+    union
+    {
+        ui_input_key Keys[256];
+        b32 KeysDown[256];
+    };
 };
+
+//
+// NOTE: Interactions
+//
 
 enum ui_interaction_type
 {
@@ -143,6 +174,31 @@ enum ui_interaction_type
     UiInteractionType_Released,
 };
 
+struct ui_slider_interaction
+{
+    aabb2 Bounds;
+    f32 MinValue;
+    f32 MaxValue;
+    f32 MouseRelativeX;
+    f32* SliderValue;
+};
+
+struct ui_drag_box_interaction
+{
+    v2* TopLeftPos;
+    v2 MouseRelativePos;
+};
+
+struct ui_float_number_box_interaction
+{
+    i32 SelectedChar;
+    i32 StartDrawChar;
+    b32 HasDecimal;
+
+    i32 TextLength;
+    char Text[64];
+};
+
 enum ui_element_type
 {
     UiElementType_None,
@@ -151,18 +207,7 @@ enum ui_element_type
     UiElementType_HorizontalSlider,
     UiElementType_DraggableBox,
     UiElementType_Image,
-};
-
-struct ui_slider_interaction
-{
-    aabb2 Bounds;
-    f32* Percent;
-};
-
-struct ui_drag_box_interaction
-{
-    v2* TopLeftPos;
-    v2 MouseRelativePos;
+    UiElementType_FloatNumberBox,
 };
 
 struct ui_interaction
@@ -175,6 +220,7 @@ struct ui_interaction
         ui_interaction_type Button;
         ui_slider_interaction Slider;
         ui_drag_box_interaction DragBox;
+        ui_float_number_box_interaction FloatNumberBox;
     };
 };
 
@@ -201,6 +247,7 @@ struct ui_state
     VkDescriptorSet UiDescriptor;
     
     // NOTE: Input data
+    f32 FrameTime;
     b32 MouseTouchingUi;
     b32 ProcessedInteraction;
     u32 MouseFlags;
@@ -208,10 +255,16 @@ struct ui_state
     ui_frame_input PrevInput;
     ui_interaction Hot;
     ui_interaction PrevHot;
+    ui_interaction Selected;
 
     // NOTE: General Render Data
     VkBuffer QuadVertices;
     VkBuffer QuadIndices;
+
+    // NOTE: Clip Rect Data
+    u32 MaxNumClipRects;
+    u32 NumClipRects;
+    ui_clip_rect* ClipRectArray;
     
     // NOTE: Render Rect Data
     u32 MaxNumRects; // TODO: Add GPU buffers that are dynamic to get rid of this
@@ -227,6 +280,9 @@ struct ui_state
     VkBuffer GpuGlyphBuffer;
     vk_pipeline* GlyphPipeline;
 };
+
+inline void UiStateResetClipRect(ui_state* UiState);
+inline void UiTextBoxAddChar_(char* Ptr, u32 MaxSize, u32* CurrSize, char NewValue);
 
 #include "ui.cpp"
 

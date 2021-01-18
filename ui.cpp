@@ -12,7 +12,7 @@
 #define UI_FILE_LINE_ID() ((u64)(__FILE__) + (u64)(__LINE__))
 
 //
-// NOTE: Ui Helpers
+// NOTE: Ui General Helpers
 //
 
 inline b32 UiIntersect(aabb2 A, v2 B)
@@ -20,6 +20,13 @@ inline b32 UiIntersect(aabb2 A, v2 B)
     // NOTE: Use this so that perfectly placed UI can't have the mouse hit two elements at a time
     b32 Result =  (A.Min.x <= B.x && A.Max.x > B.x &&
                    A.Min.y <= B.y && A.Max.y > B.y);
+    return Result;
+}
+
+inline b32 UiContained(aabb2 Parent, aabb2 Child)
+{
+    b32 Result =  (Parent.Min.x <= Child.Min.x && Parent.Max.x >= Child.Max.x &&
+                   Parent.Min.y <= Child.Min.y && Parent.Max.y >= Child.Max.y);
     return Result;
 }
 
@@ -41,6 +48,42 @@ inline b32 UiInteractionsAreSame(ui_interaction Interaction1, ui_interaction Int
 {
     b32 Result = UiInteractionsAreSame(Interaction1.Hash, Interaction2.Hash);
     return Result;
+}
+
+inline b32 UiKeyDown(ui_frame_input* Input, u8 Key)
+{
+    b32 Result = Input->Keys[Key].Flags & UiKeyFlag_OutputInput;
+    return Result;
+}
+
+#define UiTextBoxAddChar(Array, CurrSize, SelectedChar, NewValue) UiTextBoxAddChar_((Array), sizeof(Array) / sizeof(char), CurrSize, SelectedChar, NewValue)
+inline void UiTextBoxAddChar_(char* Ptr, i32 MaxSize, i32* CurrSize, i32* SelectedChar, char NewValue)
+{
+    if (*CurrSize < MaxSize)
+    {
+        // NOTE: Shift all the characters up by 1
+        for (i32 ShiftCharId = *CurrSize; ShiftCharId >= *SelectedChar; --ShiftCharId)
+        {
+            Ptr[ShiftCharId + 1] = Ptr[ShiftCharId];
+        }
+
+        Ptr[*SelectedChar] = NewValue;
+        *SelectedChar += 1;
+        *CurrSize += 1;
+    }
+}
+
+inline void UiTextBoxRemoveChar(char* Ptr, i32* CurrSize, i32 DeleteCharId)
+{
+    if (DeleteCharId >= 0 && DeleteCharId < *CurrSize)
+    {
+        // NOTE: Shift all the characters down by 1
+        for (i32 ShiftCharId = DeleteCharId; ShiftCharId < *CurrSize; ++ShiftCharId)
+        {
+            Ptr[ShiftCharId] = Ptr[ShiftCharId + 1];
+        }
+        *CurrSize -= 1;
+    }
 }
 
 //
@@ -273,6 +316,12 @@ inline void UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena*
         VkRenderPassSubPassEnd(&RpBuilder);
         UiState->RenderPass = VkRenderPassBuilderEnd(&RpBuilder, Device);
     }
+
+    // NOTE: Clip Rect Data
+    {
+        UiState->MaxNumClipRects = 100;
+        UiState->ClipRectArray = PushArray(CpuArena, ui_clip_rect, UiState->MaxNumClipRects);
+    }
     
     // NOTE: Rect Data
     {
@@ -350,8 +399,10 @@ inline void UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena*
     EndTempMem(TempMem);
 }
 
-inline void UiStateBegin(ui_state* UiState, VkDevice Device, u32 RenderWidth, u32 RenderHeight, ui_frame_input CurrInput)
+inline void UiStateBegin(ui_state* UiState, VkDevice Device, f32 FrameTime, u32 RenderWidth, u32 RenderHeight, ui_frame_input CurrRawInput)
 {
+    UiState->FrameTime = FrameTime;
+    
     if (UiState->RenderWidth != RenderWidth || UiState->RenderWidth != RenderWidth)
     {
         VkEndTempMem(UiState->GpuTempMem);
@@ -362,32 +413,77 @@ inline void UiStateBegin(ui_state* UiState, VkDevice Device, u32 RenderWidth, u3
     }
 
     // NOTE: Ui Input
-    UiState->PrevInput = UiState->CurrInput;
-    UiState->CurrInput = CurrInput;
-    UiState->MouseFlags = 0;
-    if (UiState->CurrInput.MouseDown && !UiState->PrevInput.MouseDown)
     {
-        UiState->MouseFlags |= UiMouseFlags_Pressed;
-    }
-    if (!UiState->CurrInput.MouseDown && UiState->PrevInput.MouseDown)
-    {
-        UiState->MouseFlags |= UiMouseFlags_Released;
-    }
-    if (UiState->CurrInput.MouseDown)
-    {
-        UiState->MouseFlags |= UiMouseFlags_PressedOrHeld;
-    }
-    if (UiState->CurrInput.MouseDown || (UiState->MouseFlags & UiMouseFlags_Released))
-    {
-        UiState->MouseFlags |= UiMouseFlags_HeldOrReleased;
+        UiState->PrevInput = UiState->CurrInput;
+        UiState->CurrInput = CurrRawInput;
+
+        ui_frame_input* CurrInput = &UiState->CurrInput;
+        ui_frame_input* PrevInput = &UiState->PrevInput;
+        
+        // NOTE: Handle Mouse input
+        {
+            UiState->MouseFlags = 0;
+            if (UiState->CurrInput.MouseDown && !UiState->PrevInput.MouseDown)
+            {
+                UiState->MouseFlags |= UiMouseFlag_Pressed;
+            }
+            if (!UiState->CurrInput.MouseDown && UiState->PrevInput.MouseDown)
+            {
+                UiState->MouseFlags |= UiMouseFlag_Released;
+            }
+            if (UiState->CurrInput.MouseDown)
+            {
+                UiState->MouseFlags |= UiMouseFlag_PressedOrHeld;
+            }
+            if (UiState->CurrInput.MouseDown || (UiState->MouseFlags & UiMouseFlag_Released))
+            {
+                UiState->MouseFlags |= UiMouseFlag_HeldOrReleased;
+            }
+        }
+        
+        // NOTE: Handle keyboard inputs (we control for how many times the key is reported when held / time since next input upon press)
+        {
+            u32 HandledInputs = 0;
+            for (u32 KeyId = 0; KeyId < ArrayCount(CurrRawInput.KeysDown); ++KeyId)
+            {
+                ui_input_key* PrevKey = PrevInput->Keys + KeyId;
+                ui_input_key* CurrKey = CurrInput->Keys + KeyId;
+
+                *CurrKey = {};
+                CurrKey->TimeTillNextInput = Max(0.0f, PrevKey->TimeTillNextInput - FrameTime);
+
+                // NOTE: Stagger when the UI sees input logic
+                if (CurrRawInput.KeysDown[KeyId])
+                {
+                    CurrKey->Flags |= UiKeyFlag_Down;
+                    
+                    if ((PrevKey->Flags & UiKeyFlag_Down) == 0)
+                    {
+                        // NOTE: Key was just pressed
+                        CurrKey->Flags |= UiKeyFlag_OutputInput;
+                        CurrKey->TimeTillNextInput = UI_INPUT_KEY_WAIT_TIME;
+                    }
+                    else if (CurrKey->TimeTillNextInput == 0.0f)
+                    {
+                        // NOTE: Key is held
+                        CurrKey->Flags |= UiKeyFlag_OutputInput;
+                        CurrKey->TimeTillNextInput = UI_MIN_KEY_SPAM_TIME;
+                    }
+                }
+            }
+        }
     }
     
     // NOTE: Reset our values since we are immediate mode
-    UiState->CurrZ = 0.0f;
-    UiState->NumRects = 0;
-    UiState->NumGlyphs = 0;
-    UiState->MouseTouchingUi = false;
-    UiState->ProcessedInteraction = false;
+    {
+        UiState->CurrZ = 0.0f;
+        UiState->NumRects = 0;
+        UiState->NumGlyphs = 0;
+        UiState->MouseTouchingUi = false;
+        UiState->ProcessedInteraction = false;
+        UiState->NumClipRects = 0;
+        UiStateResetClipRect(UiState);
+    }
 }
 
 inline void UiStateEnd(ui_state* UiState)
@@ -397,6 +493,7 @@ inline void UiStateEnd(ui_state* UiState)
         ui_frame_input* CurrInput = &UiState->CurrInput;
         ui_frame_input* PrevInput = &UiState->PrevInput;
         ui_interaction* Hot = &UiState->Hot;
+        ui_interaction* Selected = &UiState->Selected;
         switch (Hot->Type)
         {
             case UiElementType_Button:
@@ -406,7 +503,7 @@ inline void UiStateEnd(ui_state* UiState)
                     Hot->Button = UiInteractionType_Selected;
                     UiState->PrevHot = UiState->Hot;
                 }
-                else if (UiState->MouseFlags & UiMouseFlags_Released)
+                else if (UiState->MouseFlags & UiMouseFlag_Released)
                 {
                     if (UiInteractionsAreSame(UiState->PrevHot, *Hot))
                     {
@@ -425,12 +522,14 @@ inline void UiStateEnd(ui_state* UiState)
             {
                 ui_slider_interaction Slider = Hot->Slider;
                     
-                if (UiState->MouseFlags & UiMouseFlags_HeldOrReleased)
+                if (UiState->MouseFlags & UiMouseFlag_HeldOrReleased)
                 {
                     aabb2 Bounds = Slider.Bounds;
-                    f32 NewPercent = (f32)(CurrInput->MousePixelPos.x - Bounds.Min.x) / (f32)(Bounds.Max.x - Bounds.Min.x);
-                    *Slider.Percent = Clamp(NewPercent, 0.0f, 1.0f);
-                
+                    f32 MouseAdjustedX = CurrInput->MousePixelPos.x + Slider.MouseRelativeX;
+                    f32 NewPercent = (f32)(MouseAdjustedX - Bounds.Min.x) / (f32)(Bounds.Max.x - Bounds.Min.x);
+                    NewPercent = Clamp(NewPercent, 0.0f, 1.0f);
+                    *Slider.SliderValue = Lerp(Slider.MinValue, Slider.MaxValue, NewPercent);
+                    
                     UiState->PrevHot = UiState->Hot;
                 }
             } break;
@@ -453,11 +552,81 @@ inline void UiStateEnd(ui_state* UiState)
                     UiState->PrevHot = UiState->Hot;
                 }
             } break;
+
+            case UiElementType_FloatNumberBox:
+            {
+                ui_float_number_box_interaction* NumberBox = &Hot->FloatNumberBox;
+
+                if (UiState->MouseFlags & UiMouseFlag_Released)
+                {
+                    UiState->Selected = UiState->Hot;
+                }
+                else if (UiState->MouseFlags & UiMouseFlag_PressedOrHeld)
+                {
+                    UiState->PrevHot = UiState->Hot;
+                }
+            } break;
             
             default:
             {
                 // NOTE: We don't interact with anything so clear our prev hot
                 UiState->PrevHot = {};
+            } break;
+        }
+
+        // NOTE: Handle selected interactions
+        switch (Selected->Type)
+        {
+            case UiElementType_FloatNumberBox:
+            {
+                ui_float_number_box_interaction* NumberBox = &Selected->FloatNumberBox;
+
+                // TODO: Handle the windows cmd keys in a cleaner way? The '.' ascii doesn't match the VKCOde
+                // TODO: Why are these capital?? Windows seems to return this
+                // TODO: Handle ctrl all inputs to delete
+                if (UiKeyDown(CurrInput, 'A'))
+                {
+                    NumberBox->SelectedChar = Clamp(NumberBox->SelectedChar - 1, 0, NumberBox->TextLength);
+                }
+                if (UiKeyDown(CurrInput, 'D'))
+                {
+                    NumberBox->SelectedChar = Clamp(NumberBox->SelectedChar + 1, 0, NumberBox->TextLength);
+                }
+                if (UiKeyDown(CurrInput, VK_BACK))
+                {
+                    NumberBox->HasDecimal = NumberBox->HasDecimal && NumberBox->Text[NumberBox->SelectedChar - 1] != '.';
+                    UiTextBoxRemoveChar(NumberBox->Text, &NumberBox->TextLength, NumberBox->SelectedChar - 1);
+                    NumberBox->SelectedChar = Max(0, NumberBox->SelectedChar - 1);
+                }
+                if (UiKeyDown(CurrInput, VK_DELETE))
+                {
+                    NumberBox->HasDecimal = NumberBox->HasDecimal && NumberBox->Text[NumberBox->SelectedChar] != '.';
+                    UiTextBoxRemoveChar(NumberBox->Text, &NumberBox->TextLength, NumberBox->SelectedChar);
+                }
+                if (UiKeyDown(CurrInput, u8(VK_OEM_PERIOD)) && !NumberBox->HasDecimal)
+                {
+                    UiTextBoxAddChar(NumberBox->Text, &NumberBox->TextLength, &NumberBox->SelectedChar, '.');
+                    NumberBox->HasDecimal = true;
+                }
+
+                // NOTE: Handle digit key inputs
+                for (char DigitKey = '0'; DigitKey <= '9'; ++DigitKey)
+                {
+                    if (UiKeyDown(CurrInput, DigitKey))
+                    {
+                        UiTextBoxAddChar(NumberBox->Text, &NumberBox->TextLength, &NumberBox->SelectedChar, DigitKey);
+                    }
+                }
+
+                // NOTE: Handles unselecting when we interact with something else or click away from the element
+                if ((UiState->Hot.Type != UiElementType_None && !UiInteractionsAreSame(*Selected, *Hot)) ||
+                    UiState->Hot.Type == UiElementType_None && UiState->MouseFlags != 0)
+                {
+                    // TODO: Write out the text to float and save it
+                    UiState->Selected = {};
+                }
+
+                UiState->ProcessedInteraction = true;
             } break;
         }
 
@@ -551,11 +720,6 @@ inline void UiStateRender(ui_state* UiState, VkDevice Device, vk_commands Comman
     ViewPort.minDepth = 0.0f;
     ViewPort.maxDepth = 1.0f;
     vkCmdSetViewport(Commands.Buffer, 0, 1, &ViewPort);
-    
-    VkRect2D Scissor = {};
-    Scissor.offset = {};
-    Scissor.extent = { UiState->RenderWidth, UiState->RenderHeight };
-    vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
 
     // NOTE: Render Rects
     {
@@ -570,7 +734,26 @@ inline void UiStateRender(ui_state* UiState, VkDevice Device, vk_commands Comman
         VkDeviceSize Offset = 0;
         vkCmdBindVertexBuffers(Commands.Buffer, 0, 1, &UiState->QuadVertices, &Offset);
         vkCmdBindIndexBuffer(Commands.Buffer, UiState->QuadIndices, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(Commands.Buffer, 6, UiState->NumRects, 0, 0, 0);
+
+        u32 CurrRectId = 0;
+        for (u32 ClipRectId = 0; ClipRectId < UiState->NumClipRects; ++ClipRectId)
+        {
+            ui_clip_rect* ClipRect = UiState->ClipRectArray + ClipRectId;
+
+            if (ClipRect->NumRectsAffected > 0)
+            {
+                VkRect2D Scissor = {};
+                Scissor.extent.width = AabbGetDim(ClipRect->Bounds).x;
+                Scissor.extent.height = AabbGetDim(ClipRect->Bounds).y;
+                Scissor.offset.x = ClipRect->Bounds.Min.x;
+                Scissor.offset.y = UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height;
+                vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
+
+                vkCmdDrawIndexed(Commands.Buffer, 6, ClipRect->NumRectsAffected, 0, 0, CurrRectId);
+
+                CurrRectId += ClipRect->NumRectsAffected;
+            }
+        }
     }
 
     // TODO: Make below a separate sub pass due to transparency? 
@@ -588,19 +771,34 @@ inline void UiStateRender(ui_state* UiState, VkDevice Device, vk_commands Comman
         VkDeviceSize Offset = 0;
         vkCmdBindVertexBuffers(Commands.Buffer, 0, 1, &UiState->QuadVertices, &Offset);
         vkCmdBindIndexBuffer(Commands.Buffer, UiState->QuadIndices, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(Commands.Buffer, 6, UiState->NumGlyphs, 0, 0, 0);
+
+        // NOTE: We go in reverse for clip rects since we render back to front
+        u32 CurrGlyphId = 0;
+        for (i32 ClipRectId = UiState->NumClipRects - 1; ClipRectId >= 0; --ClipRectId)
+        {
+            ui_clip_rect* ClipRect = UiState->ClipRectArray + ClipRectId;
+
+            if (ClipRect->NumGlyphsAffected > 0)
+            {
+                VkRect2D Scissor = {};
+                Scissor.extent.width = AabbGetDim(ClipRect->Bounds).x;
+                Scissor.extent.height = AabbGetDim(ClipRect->Bounds).y;
+                Scissor.offset.x = ClipRect->Bounds.Min.x;
+                Scissor.offset.y = UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height;
+                vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
+
+                vkCmdDrawIndexed(Commands.Buffer, 6, ClipRect->NumGlyphsAffected, 0, 0, CurrGlyphId);
+                CurrGlyphId += ClipRect->NumGlyphsAffected;
+            }
+        }
     }
     
     vkCmdEndRenderPass(Commands.Buffer);
 }
 
-inline f32 UiStateGetZ(ui_state* UiState)
-{
-    f32 Result = UiState->CurrZ;
-    UiState->CurrZ += UiState->StepZ;
-
-    return Result;
-}
+//
+// NOTE: UiState Input Helpers
+//
 
 inline void UiStateAddInteraction(ui_state* UiState, ui_interaction Interaction)
 {
@@ -614,10 +812,11 @@ inline void UiStateAddInteraction(ui_state* UiState, ui_interaction Interaction)
     {
         // NOTE: Below interactions keep interacting so they get priority
         if (UiInteractionsAreSame(Interaction, UiState->PrevHot) &&
-            (UiState->Hot.Type == UiElementType_Button ||
-             UiState->Hot.Type == UiElementType_HorizontalSlider || 
-             UiState->Hot.Type == UiElementType_DraggableBox ||
-             UiState->Hot.Type == UiElementType_Image))
+            (Interaction.Type == UiElementType_Button ||
+             Interaction.Type == UiElementType_HorizontalSlider || 
+             Interaction.Type == UiElementType_DraggableBox ||
+             Interaction.Type == UiElementType_Image ||
+             Interaction.Type == UiElementType_FloatNumberBox))
         {
             UiState->Hot = Interaction;
             UiState->ProcessedInteraction = true;
@@ -632,7 +831,8 @@ inline ui_interaction_type UiStateProcessElement(ui_state* UiState, aabb2 Bounds
     b32 IsPrevHot = UiInteractionsAreSame(Hash, UiState->PrevHot.Hash);
     b32 Intersects = UiIntersect(Bounds, UiState->CurrInput.MousePixelPos);
     UiState->MouseTouchingUi = UiState->MouseTouchingUi || Intersects;
-    if (Intersects || (IsPrevHot && (UiState->MouseFlags & UiMouseFlags_HeldOrReleased)))
+    if ((Intersects && UiState->MouseFlags & UiMouseFlag_Pressed) ||
+        (IsPrevHot && (UiState->MouseFlags & UiMouseFlag_HeldOrReleased)))
     {
         ui_interaction Interaction = {};
         Interaction.Type = UiElementType_Button;
@@ -646,8 +846,38 @@ inline ui_interaction_type UiStateProcessElement(ui_state* UiState, aabb2 Bounds
     {
         Result = UiState->PrevHot.Button;
     }
+    else if (Intersects)
+    {
+        Result = UiInteractionType_Hover;
+    }
 
     return Result;
+}
+
+//
+// NOTE: UiState Render Helpers
+//
+
+inline f32 UiStateGetZ(ui_state* UiState)
+{
+    f32 Result = UiState->CurrZ;
+    UiState->CurrZ += UiState->StepZ;
+
+    return Result;
+}
+
+inline void UiStateSetClipRect(ui_state* UiState, aabb2i Bounds)
+{
+    Assert(UiState->NumClipRects < UiState->MaxNumClipRects);
+
+    ui_clip_rect* ClipRect = UiState->ClipRectArray + UiState->NumClipRects++;
+    *ClipRect = {};
+    ClipRect->Bounds = Bounds;
+}
+
+inline void UiStateResetClipRect(ui_state* UiState)
+{
+    UiStateSetClipRect(UiState, AabbMinMax(V2i(0, 0), V2i(UiState->RenderWidth, UiState->RenderHeight)));
 }
 
 inline void UiStatePushRect(ui_state* UiState, aabb2 Bounds, v4 Color)
@@ -658,6 +888,10 @@ inline void UiStatePushRect(ui_state* UiState, aabb2 Bounds, v4 Color)
     CurrRect->Radius = AabbGetRadius(Bounds);
     CurrRect->Z = UiStateGetZ(UiState);
     CurrRect->Color = Color;
+
+    Assert(UiState->NumClipRects >= 1);
+    ui_clip_rect* ClipRect = UiState->ClipRectArray + UiState->NumClipRects - 1;
+    ClipRect->NumRectsAffected += 1;
 }
 
 inline void UiStatePushRectOutline(ui_state* UiState, aabb2 Bounds, v4 Color, f32 Thickness)
@@ -687,6 +921,10 @@ inline void UiStatePushGlyph(ui_state* UiState, char Glyph, f32 Z, aabb2 Bounds,
     CurrGlyph->GlyphOffset = Glyph;
     CurrGlyph->Z = Z;
     CurrGlyph->Color = Color;
+
+    Assert(UiState->NumClipRects >= 1);
+    ui_clip_rect* ClipRect = UiState->ClipRectArray + UiState->NumClipRects - 1;
+    ClipRect->NumGlyphsAffected += 1;
 }
 
 inline f32 UiFontGetLineAdvance(ui_font* Font, f32 CharHeight)
@@ -703,7 +941,7 @@ inline f32 UiFontGetStartY(ui_font* Font, f32 MinY, f32 MaxY)
     return StartY;
 }
 
-inline aabb2 UiStateGetTextSizeNoFormat(ui_state* UiState, f32 MaxCharHeight, char* Text)
+inline aabb2 UiStateGetTextSize(ui_state* UiState, f32 MaxCharHeight, char* Text)
 {
     // IMPORTANT: This outputs the bounds centered around (0, 0) for easier translation
     aabb2 Result = {};
@@ -752,9 +990,78 @@ inline aabb2 UiStateGetTextSizeNoFormat(ui_state* UiState, f32 MaxCharHeight, ch
     Result.Max.x = Max(Result.Max.x, CurrPos.x);
     // NOTE: Make bot left 0, 0
     Result.Max.y = -CurrPos.y + MaxCharHeight; 
-    // NOTE: Recenter our text so that (0, 0) is in the middle
+
+    return Result;
+}
+
+inline aabb2 UiStateGetTextSizeCentered(ui_state* UiState, f32 MaxCharHeight, char* Text)
+{
+    aabb2 Result = UiStateGetTextSize(UiState, MaxCharHeight, Text);
     Result = Translate(Result, -AabbGetRadius(Result));
 
+    return Result;
+}
+
+inline aabb2 UiStateGetGlyphBounds(ui_state* UiState, f32 MaxCharHeight, char* Text, u32 GlyphId)
+{
+    aabb2 Result = {};
+
+    // NOTE: https://github.com/justinmeiners/stb-truetype-example/blob/master/source/main.c
+    ui_font* Font = &UiState->Font;
+
+    // NOTE: We start at (0, 0) and record left to right, and downwards for our text bounds
+    v2 StartPos = V2(0.0f);
+    v2 CurrPos = StartPos;
+    char* StartText = Text;
+    char PrevGlyph = 0;
+    char CurrGlyph = 0;
+    while (true)
+    {
+        CurrGlyph = *Text;
+
+        ui_glyph* Glyph = Font->GlyphArray + CurrGlyph;
+        f32 Kerning = 0.0f;
+        f32 ScaledStepX = MaxCharHeight*Glyph->StepX;
+        b32 StartNewLine = CurrGlyph == '\n';
+        if (!StartNewLine && PrevGlyph != 0)
+        {
+            Kerning = MaxCharHeight*Font->KernArray[CurrGlyph*255 + PrevGlyph];
+        }
+        
+        if (StartNewLine)
+        {
+            CurrPos.y -= MaxCharHeight * (1.0f + Font->LineGap);
+            CurrPos.x = StartPos.x;
+            PrevGlyph = 0;
+            Text += 1;
+
+            continue;
+        }
+
+        // NOTE: Apply kerning and step
+        CurrPos.x += Kerning;
+        if (u64(Text - StartText) == GlyphId)
+        {
+            if (CurrGlyph != ' ' || CurrGlyph == 0)
+            {
+                // NOTE: Glyph dim will be the aabb size, but we offset by align pos since some chars like 'p'
+                // need to be descend a bit
+                v2 CharDim = Glyph->Dim * MaxCharHeight;
+                Result = AabbMinMax(V2(0, 0), CharDim);
+                Result = Translate(Result, CurrPos + MaxCharHeight*(Glyph->AlignPos + V2(0.0f, -Font->MaxDescent)));
+            }
+            else
+            {
+                Result = AabbMinMax(V2(0, 0), V2(ScaledStepX, MaxCharHeight));
+            }
+            
+            break;
+        }
+        CurrPos.x += ScaledStepX;
+        PrevGlyph = CurrGlyph;
+        ++Text;
+    }
+    
     return Result;
 }
 
@@ -895,7 +1202,7 @@ inline b32 UiButtonText_(ui_state* UiState, aabb2 Bounds, f32 MaxCharHeight, cha
     }
 
     // NOTE: Center the text to the button
-    aabb2 TextBounds = UiStateGetTextSizeNoFormat(UiState, MaxCharHeight, Text);
+    aabb2 TextBounds = UiStateGetTextSizeCentered(UiState, MaxCharHeight, Text);
     TextBounds = Translate(TextBounds, AabbGetCenter(DrawBounds));
 
     UiStatePushTextNoFormat(UiState, TextBounds, MaxCharHeight, Text, TextColor);
@@ -906,32 +1213,51 @@ inline b32 UiButtonText_(ui_state* UiState, aabb2 Bounds, f32 MaxCharHeight, cha
     return Result;
 }
 
-inline void UiHorizontalSlider(ui_state* UiState, aabb2 SliderBounds, v2 KnobRadius, f32* PercentValue)
+inline void UiHorizontalSlider(ui_state* UiState, aabb2 SliderBounds, v2 KnobRadius, f32 MinValue, f32 MaxValue, f32* SliderValue)
 {
-    // TODO: Add ranges on the value
-    // TODO: Add text to write the number
-    u64 Hash = UiElementHash(UiElementType_HorizontalSlider, u32(uintptr_t(PercentValue)));
+    Assert(MaxValue >= MinValue);
+    Assert(*SliderValue >= MinValue && *SliderValue <= MaxValue);
+    
+    u64 Hash = UiElementHash(UiElementType_HorizontalSlider, u32(uintptr_t(SliderValue)));
     
     // NOTE: Generate all our collision bounds
+    f32 PercentValue = (*SliderValue - MinValue) / (MaxValue - MinValue);
     aabb2 CollisionBounds = Enlarge(SliderBounds, V2(-KnobRadius.x, 0.0f));
-    v2 KnobCenter = V2(Lerp(CollisionBounds.Min.x, CollisionBounds.Max.x, *PercentValue),
+    v2 KnobCenter = V2(Lerp(CollisionBounds.Min.x, CollisionBounds.Max.x, PercentValue),
                        Lerp(CollisionBounds.Min.y, CollisionBounds.Max.y, 0.5f));
     aabb2 SliderKnob = AabbCenterRadius(KnobCenter, KnobRadius);
-    
-    // NOTE: Check for slider interaction (we keep it press and hold and move the mouse off)
-    b32 IntersectsSlider = (UiIntersect(SliderBounds, UiState->CurrInput.MousePixelPos) ||
-                            UiIntersect(SliderKnob, UiState->CurrInput.MousePixelPos));
-    UiState->MouseTouchingUi = UiState->MouseTouchingUi || IntersectsSlider;    
-    if ((UiState->MouseFlags & UiMouseFlags_HeldOrReleased) &&
-        (IntersectsSlider || UiInteractionsAreSame(Hash, UiState->PrevHot.Hash)))
-    {
-        // TODO: The slider jumps a bit to center the mouse, keep it relative to the initial interaction
-        ui_interaction Interaction = {};
-        Interaction.Type = UiElementType_HorizontalSlider;
-        Interaction.Hash = Hash;
-        Interaction.Slider.Bounds = CollisionBounds;
-        Interaction.Slider.Percent = PercentValue;
 
+    ui_interaction Interaction = {};
+    Interaction.Type = UiElementType_HorizontalSlider;
+    Interaction.Hash = Hash;
+    Interaction.Slider.Bounds = CollisionBounds;
+    Interaction.Slider.SliderValue = SliderValue;
+    Interaction.Slider.MinValue = MinValue;
+    Interaction.Slider.MaxValue = MaxValue;
+    
+    // NOTE: Check for slider interaction
+    b32 IntersectsKnob = UiIntersect(SliderKnob, UiState->CurrInput.MousePixelPos);
+    b32 IntersectsElement = (UiIntersect(SliderBounds, UiState->CurrInput.MousePixelPos) || IntersectsKnob);
+    UiState->MouseTouchingUi = UiState->MouseTouchingUi || IntersectsElement;
+    if ((UiState->MouseFlags & UiMouseFlag_Pressed) && IntersectsElement)
+    {
+        if (IntersectsKnob)
+        {
+            // NOTE: We calculate a mouse relative pos here
+            Interaction.Slider.MouseRelativeX = AabbGetCenter(SliderKnob).x - UiState->CurrInput.MousePixelPos.x;
+        }
+        else
+        {
+            // NOTE: We recenter the knob to be at the center of our
+            Interaction.Slider.MouseRelativeX = 0.0f;
+        }
+        UiStateAddInteraction(UiState, Interaction);
+    }
+    else if ((UiState->MouseFlags & UiMouseFlag_HeldOrReleased) &&
+             UiInteractionsAreSame(Hash, UiState->PrevHot.Hash))
+    {
+        // NOTE: We keep interacting with the slider if we interacted last frame
+        Interaction.Slider.MouseRelativeX = UiState->PrevHot.Slider.MouseRelativeX;
         UiStateAddInteraction(UiState, Interaction);
     }
 
@@ -949,12 +1275,12 @@ inline void UiDragabbleBoxNoRender(ui_state* UiState, aabb2 Bounds, v2* TopLeftP
     Interaction.Hash = Hash;
     Interaction.DragBox.TopLeftPos = TopLeftPos;
     
-    if (UiIntersect(Bounds, UiState->CurrInput.MousePixelPos) && (UiState->MouseFlags & UiMouseFlags_Pressed))
+    if (UiIntersect(Bounds, UiState->CurrInput.MousePixelPos) && (UiState->MouseFlags & UiMouseFlag_Pressed))
     {
         Interaction.DragBox.MouseRelativePos = *TopLeftPos - UiState->CurrInput.MousePixelPos;
         UiStateAddInteraction(UiState, Interaction);
     }
-    else if (UiInteractionsAreSame(Hash, UiState->PrevHot.Hash) && (UiState->MouseFlags & UiMouseFlags_PressedOrHeld))
+    else if (UiInteractionsAreSame(Hash, UiState->PrevHot.Hash) && (UiState->MouseFlags & UiMouseFlag_PressedOrHeld))
     {
         // NOTE: Sometimes mouse moves to fast but we know we are interacting with it so we only check for past interaction
         Interaction.DragBox.MouseRelativePos = UiState->PrevHot.DragBox.MouseRelativePos;
@@ -968,7 +1294,7 @@ inline void UiRect_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 InputHash)
     u64 Hash = UiElementHash(UiElementType_Image, InputHash);
     
     if ((UiIntersect(Bounds, UiState->CurrInput.MousePixelPos) || UiInteractionsAreSame(Hash, UiState->PrevHot.Hash)) &&
-        (UiState->MouseFlags & UiMouseFlags_PressedOrHeld))
+        (UiState->MouseFlags & UiMouseFlag_PressedOrHeld))
     {
         ui_interaction Interaction = {};
         Interaction.Type = UiElementType_Image;
@@ -977,6 +1303,101 @@ inline void UiRect_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 InputHash)
     }
 
     UiStatePushRect(UiState, Bounds, Color);
+}
+
+inline void UiNumberBox(ui_state* UiState, f32 MaxCharHeight, aabb2 Bounds, f32* Value)
+{
+    u64 Hash = UiElementHash(UiElementType_DraggableBox, u32(uintptr_t(Value)));
+
+    // NOTE: Text that gets drawn, we control which part of the text is visible by incrementing/decrementing where our draw text starts
+    // in our entire number string
+    char* DrawText = 0;
+    char DrawTextSpace[64];
+
+    ui_interaction Interaction = {};
+    Interaction.Type = UiElementType_FloatNumberBox;
+    Interaction.Hash = Hash;
+
+    // NOTE: Area where text can be placed
+    aabb2 TextAreaBounds = Enlarge(Bounds, V2(-5));
+
+    v4 TextColor = V4(1);
+    aabb2 SelectedGlyphBounds = {};
+    b32 Selected = UiInteractionsAreSame(Hash, UiState->Selected.Hash);
+    b32 Intersects = UiIntersect(Bounds, UiState->CurrInput.MousePixelPos);
+    if (Selected)
+    {
+        // NOTE: We have this element selected, the inputs are now keyboard inputs
+        ui_float_number_box_interaction* SelectedData = &UiState->Selected.FloatNumberBox;
+            
+        // NOTE: Move the text we are drawing so that the selected char is visible
+        u32 NewStartDrawChar = SelectedData->StartDrawChar;
+        if (SelectedData->StartDrawChar > SelectedData->SelectedChar)
+        {
+            NewStartDrawChar = SelectedData->SelectedChar;
+        }
+        else
+        {
+            // IMPORTANT: We assume we cannot have more than one key of the same type pressed in a frame
+            SelectedGlyphBounds = UiStateGetGlyphBounds(UiState, MaxCharHeight, SelectedData->Text + NewStartDrawChar, SelectedData->SelectedChar - NewStartDrawChar);
+            // NOTE: Move text area so that bottom corner is 0, 0
+            aabb2 RecenteredTextArea = {};
+            RecenteredTextArea.Max = AabbGetDim(TextAreaBounds);
+            
+            if (!UiContained(RecenteredTextArea, SelectedGlyphBounds))
+            {
+                NewStartDrawChar = SelectedData->StartDrawChar + 1;
+            }
+        }
+
+        DrawText = SelectedData->Text + NewStartDrawChar;
+        SelectedData->StartDrawChar = NewStartDrawChar;
+    }
+    else if (Intersects && ((UiState->MouseFlags & UiMouseFlag_Pressed)) ||
+             UiInteractionsAreSame(Hash, UiState->PrevHot.Hash) && (UiState->MouseFlags & UiMouseFlag_HeldOrReleased))
+    {
+        // TODO: Probably should be in our string lib
+        DrawText = DrawTextSpace;
+        snprintf(DrawText, sizeof(DrawText), "%f", *Value);
+        Interaction.FloatNumberBox.TextLength = u32(strlen(DrawText));
+        Interaction.FloatNumberBox.HasDecimal = true;
+        Copy(DrawText, Interaction.FloatNumberBox.Text, sizeof(DrawText));
+
+        UiStateAddInteraction(UiState, Interaction);
+    }
+    else
+    {
+        DrawText = DrawTextSpace;
+        snprintf(DrawText, sizeof(DrawText), "%f", *Value);
+    }
+    
+    // NOTE: Calculate bounds and draw
+    aabb2 TextBounds = UiStateGetTextSize(UiState, MaxCharHeight, DrawText);
+    v2 TextOffset = AabbGetCenter(Bounds) - AabbGetRadius(TextBounds);
+    TextBounds = Translate(TextBounds, TextOffset);
+    TextOffset.x += TextAreaBounds.Min.x - TextBounds.Min.x;
+    TextBounds.Min.x = TextAreaBounds.Min.x;
+    
+    if (Intersects || Selected)
+    {
+        TextColor = V4(0.2f, 0.9f, 0.9f, 1.0f);
+    }
+
+    UiStateSetClipRect(UiState, Aabb2i(Bounds));
+    UiStatePushTextNoFormat(UiState, TextBounds, MaxCharHeight, DrawText, TextColor);
+
+    if (Selected)
+    {
+        // NOTE: Highlight selected glyph
+        SelectedGlyphBounds = Translate(SelectedGlyphBounds, TextOffset);
+        SelectedGlyphBounds.Min.y = TextBounds.Min.y;
+        SelectedGlyphBounds.Max.y = TextBounds.Max.y;
+        UiStatePushRect(UiState, SelectedGlyphBounds, V4(1, 0, 0, 1));
+    }
+    
+    UiStatePushRectOutline(UiState, Bounds, V4(1, 1, 1, 1), 2);
+    UiStatePushRect(UiState, Bounds, V4(0, 0, 1, 1));
+    UiStateResetClipRect(UiState);
 }
 
 //
@@ -1044,7 +1465,7 @@ inline void UiPanelEnd(ui_panel* Panel)
         // NOTE: Calculate interaction with the panel for dragging
         UiDragabbleBoxNoRender(Panel->UiState, TitleBounds, Panel->TopLeftPos);
 
-        aabb2 TextBounds = UiStateGetTextSizeNoFormat(Panel->UiState, Panel->MaxCharHeight, Panel->Name);
+        aabb2 TextBounds = UiStateGetTextSizeCentered(Panel->UiState, Panel->MaxCharHeight, Panel->Name);
         TextBounds = Translate(TextBounds, AabbGetCenter(TitleBounds));
 
         UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Panel->Name, V4(1));
@@ -1056,10 +1477,10 @@ inline void UiPanelEnd(ui_panel* Panel)
     UiRect(Panel->UiState, PanelBounds, V4(0.1f, 0.4f, 0.7f, 1.0f));
 }
 
-inline void UiPanelHorizontalSlider(ui_panel* Panel, f32* PercentValue)
+inline void UiPanelHorizontalSlider(ui_panel* Panel, f32 MinValue, f32 MaxValue, f32* PercentValue)
 {
     aabb2 SliderBounds = Translate(Panel->SliderBounds, Panel->CurrPos);
-    UiHorizontalSlider(Panel->UiState, SliderBounds, Panel->KnobRadius, PercentValue);
+    UiHorizontalSlider(Panel->UiState, SliderBounds, Panel->KnobRadius, MinValue, MaxValue, PercentValue);
 
     // NOTE: Increment current position in panel
     f32 MaxDimY = Max(AabbGetDim(SliderBounds).y, 2*Panel->KnobRadius.y);
@@ -1069,7 +1490,7 @@ inline void UiPanelHorizontalSlider(ui_panel* Panel, f32* PercentValue)
 
 inline void UiPanelText(ui_panel* Panel, char* Text)
 {
-    aabb2 TextBounds = UiStateGetTextSizeNoFormat(Panel->UiState, Panel->MaxCharHeight, Text);
+    aabb2 TextBounds = UiStateGetTextSizeCentered(Panel->UiState, Panel->MaxCharHeight, Text);
     TextBounds = Translate(TextBounds, Panel->CurrPos + V2(1, -1) * AabbGetRadius(TextBounds));
     UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Text, V4(1, 1, 1, 1));
 
@@ -1087,6 +1508,94 @@ inline void UiPanelCheckMark(ui_panel* Panel)
 {
 }
 */
+
+//
+// =======================================================================================================================================
+//
+
+// NOTE: UI Testing for each element if needed
+
+#if 0
+    {
+        ui_state* UiState = &DemoState->UiState;
+
+        ui_frame_input UiCurrInput = {};
+        UiCurrInput.MouseDown = CurrInput->MouseDown;
+        UiCurrInput.MousePixelPos = V2(CurrInput->MousePixelPos);
+        UiCurrInput.MouseScroll = CurrInput->MouseScroll;
+        Copy(CurrInput->KeysDown, UiCurrInput.KeysDown, sizeof(UiCurrInput.KeysDown));
+        UiStateBegin(UiState, RenderState->Device, RenderState->WindowWidth, RenderState->WindowHeight, UiCurrInput);
+        
+#if 0
+        local_global v4 ButtonColor = V4(1, 1, 1, 1);
+        switch (UiButton(UiState, AabbCenterRadius(V2(100), V2(50)), ButtonColor))
+        {
+            case UiInteractionType_Hover:
+            {
+                ButtonColor = V4(1, 0, 0, 1);
+            } break;
+
+            case UiInteractionType_Selected:
+            {
+                ButtonColor = V4(0, 1, 0, 1);
+            } break;
+
+            case UiInteractionType_Released:
+            {
+                ButtonColor = V4(1, 0, 1, 1);
+            } break;
+
+            default:
+            {
+                ButtonColor = V4(1, 1, 1, 1);
+            } break;
+        }
+#endif
+        
+        if (UiButtonAnimated(UiState, AabbCenterRadius(V2(100), V2(50)), V4(0.1f, 0.4f, 0.9f, 1.0f)))
+        {
+        }
+
+        local_global f32 Test1 = 2.0f;
+        local_global f32 Test2 = 5.0f;
+        local_global f32 Test3 = 6.0f;
+        UiHorizontalSlider(UiState, AabbCenterRadius(V2(200), V2(100, 5)), V2(20), 2, 3, &Test1);
+
+        UiStatePushGlyph(UiState, 'A', 0.5, AabbCenterRadius(V2(300), V2(50)), V4(1));
+        UiStatePushTextNoFormat(UiState, V2(40, 500), 20.0f, "Testing", V4(1));
+
+        UiButtonText(UiState, AabbCenterRadius(V2(400, 100), V2(50)), 40.0f, "Test", V4(0.1f, 0.4f, 0.9f, 1.0f));
+
+        local_global v2 PanelPos = V2(600, 300);
+        ui_panel Panel = UiPanelBegin(UiState, &PanelPos, "Panel");
+        UiPanelText(&Panel, "Text:");
+        UiPanelHorizontalSlider(&Panel, 4, 10, &Test2);
+        UiPanelNextRow(&Panel);
+        UiPanelText(&Panel, "Header:");
+        UiPanelNextRow(&Panel);
+        UiPanelText(&Panel, "Text:");
+        UiPanelHorizontalSlider(&Panel, 4, 10, &Test3);
+        UiPanelEnd(&Panel);
+        
+        UiStateEnd(UiState);
+    }
+
+    // NOTE: Testing if the text boudns and glyph bounds all are calculated correctly
+    {
+        char* TestText = "100.0000";
+        aabb2 SelectedGlyphBounds = UiStateGetGlyphBounds(UiState, MaxCharHeight, TestText, 3);
+        aabb2 OldTextBounds = UiStateGetTextSize(UiState, MaxCharHeight, TestText);
+
+        SelectedGlyphBounds = Translate(SelectedGlyphBounds, V2(20, 20));
+        OldTextBounds = Translate(OldTextBounds, V2(20, 20));
+        
+        UiStatePushTextNoFormat(UiState, OldTextBounds, MaxCharHeight, TestText, V4(1));
+        UiStatePushRect(UiState, SelectedGlyphBounds, V4(0, 0, 1, 1));
+        UiStatePushRect(UiState, OldTextBounds, V4(1, 0, 0, 1));
+    }
+
+
+#endif
 
 //
 // =======================================================================================================================================
