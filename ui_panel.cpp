@@ -1,238 +1,141 @@
 
 //
-// NOTE: Panel functions
+// NOTE: Ui Panel
 //
 
-// NOTE: Element creation code
-
-#if 0
-#if 0
-UiSetLayer(2);
-UiDisplayU32("Gold", Gold, V2());
-UiDisplayU32("Lives", Lives, V2());
-UiTextureButton(Pos, Size, TextureId_SettingsIcon)
-UiSlider();
-
-UiBeginPanel();
-UiPanelImage(Size, TextureId_ToolTip);
-UiPanelDropDown("AssetId", AssetOptions, NumAssetOptions, &RenderId);
-UiPanelF32("PosX", &Pos.x);
-UiPanelU32("RoundId", &RoundId);
-UiPanelNextRow();
-UiEndPanel();
-#endif
-
-inline ui_panel UiBeginPanel(ui_state* UiState, v2 StartPos, f32 Size, f32 MaxWidth)
+inline ui_panel UiPanelBegin(ui_state* UiState, v2* TopLeftPos, char* Name)
 {
-    Assert(MaxWidth >= Size);
-    
     ui_panel Result = {};
-#if 0
     Result.UiState = UiState;
-    Result.MaxWidth = MaxWidth;
-    Result.StartPos = StartPos;
-    Result.MinPosY = 1.0f; // NOTE: Y decreases so we set to 1
-    Result.Size = Size;
-    Result.StepGap = 0.2f*V2(Size, Size);
-    Result.RowStepY = Size;
-    Result.CurrPos = StartPos - V2(0.0f, Result.StepGap.y);
-#endif    
+    Result.TopLeftPos = TopLeftPos; // NOTE: Passed into input to be dragged around
+    Result.Name = Name;
+    
+    // NOTE: Set standard sized values
+    {
+        // NOTE: All bounds have the min at the top left corner
+        Result.KnobRadius = V2(20);
+        Result.SliderBounds = AabbCenterRadius(V2(100.0f, -Result.KnobRadius.y), V2(100, 5));
+
+        Result.MaxCharHeight = 40.0f;
+
+        v2 NumberBoxRadius = V2(55, 20);
+        Result.NumberBoxBounds = AabbCenterRadius(V2(1, -1) * NumberBoxRadius, NumberBoxRadius);
+
+        // IMPORTANT: All bounds should be created such that top left is 0,0
+        Result.BorderGap = 15.0f;
+        Result.ElementGap = 10.0f;
+        Result.LineGap = 6.0f;
+        Result.TitleHeight = Result.MaxCharHeight + 4.0f;
+        Result.IndentAmount = 50.0f;
+    }
+
+    // NOTE: Set building variables
+    {
+        Result.CurrPos = *TopLeftPos + V2(Result.BorderGap, -Result.BorderGap - Result.TitleHeight);
+    }
+
     return Result;
 }
 
 inline void UiPanelNextRow(ui_panel* Panel)
 {
-#if 0
-    Panel->CurrPos.x = Panel->StartPos.x;
-    Panel->CurrPos.y -= Panel->RowStepY + Panel->StepGap.y;
-
-    // NOTE: Get the current maximum Y of panel
-    Panel->MinPosY = Min(Panel->MinPosY, Panel->CurrPos.y);
-#endif
+    Panel->PanelMaxX = Max(Panel->PanelMaxX, Panel->CurrPos.x);
+    Panel->CurrPos.x = Panel->TopLeftPos->x + Panel->BorderGap;
+    Panel->CurrPos.y -= Panel->CurrRowMaxY + Panel->LineGap;
+    Panel->CurrRowMaxY = 0.0f;
 }
 
-// NOTE: We do this because macros are dumb in C++, https://stackoverflow.com/questions/11761703/overloading-macro-on-number-of-arguments
-#define UI_PANEL_BUTTON_GET_MACRO(_1,_2,_3,_4,NAME,...) NAME
-#define UiPanelButton(...) EXPAND(UI_PANEL_BUTTON_GET_MACRO(__VA_ARGS__, UiPanelButton4, UiPanelButton3, UiPanelButton2)(__VA_ARGS__))
-#define UiPanelButton2(Panel, Name) UiPanelButton_(Panel, Name)
-#define UiPanelButton3(Panel, Flags, TextureId) UiPanelButton_(Panel, Flags, TextureId, (u32)UI_FILE_LINE_ID())
-#define UiPanelButton4(Panel, Flags, TextureId, RefId) UiPanelButton_(Panel, Flags, TextureId, (u32)UI_FILE_LINE_ID() + RefId)
-inline ui_button_interaction UiPanelButton_(ui_panel* Panel, u32 Flags, u32 TextureId, u32 RefId)
+inline void UiPanelIndent(ui_panel* Panel)
 {
-#if 0
-    Panel->CurrPos.x += Panel->StepGap.x;
-    
-    aabb2 ButtonBounds = AabbMinMax(V2(Panel->CurrPos.x, Panel->CurrPos.y - Panel->Size),
-                                    V2(Panel->CurrPos.x + Panel->Size, Panel->CurrPos.y));
-
-    // TODO: FIX
-#if 0
-    if (!(Flags & UiElementFlag_NotAspectCorrect))
-    {
-        // NOTE: We handle the aspect ratio here so remove the flag to not do it twice
-        ButtonBounds = UiMakeAspectCorrect(Panel->UiState->AspectRatio, ButtonBounds);
-        Flags |= UiElementFlag_NotAspectCorrect;
-    }
-#endif
-    
-    Panel->CurrPos.x += AabbGetDim(ButtonBounds).x;
-#endif
-    
-    // TODO: FIX
-    return {}; //UiButton(Panel->UiState, ButtonBounds, Flags, TextureId, RefId);
+    Panel->CurrPos.x += Panel->IndentAmount;
 }
 
-inline ui_button_interaction UiPanelButton_(ui_panel* Panel, char* Name)
+inline void UiPanelNextRowIndent(ui_panel* Panel)
 {
-    ui_button_interaction Result = {};
-    
-#if 0
-    // TODO: Customize??
-    u32 FontId = Font_General;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    // NOTE: Calculate text and button bounds
-    aabb2 ButtonBounds = {};
-    aabb2 TextBounds = {};
-    {
-        f32 TextInStep = Panel->Size * 0.1f;
-        f32 TextMinY = Panel->CurrPos.y - Panel->Size + TextInStep;
-        f32 TextMaxY = Panel->CurrPos.y - TextInStep;
-        v2 TextStartPos = V2(Panel->CurrPos.x + TextInStep, UiTextGetStartY(Panel->UiState, FontId, TextMinY, TextMaxY));
-
-        // TODO: FIX
-        TextBounds = {}; //UiSizeText(Panel->UiState, Font_General, TextStartPos, TextMaxY - TextMinY, Name);
-        ButtonBounds = AabbMinMax(V2(TextBounds.Min.x - TextInStep, Panel->CurrPos.y - Panel->Size),
-                                  V2(TextBounds.Max.x + TextInStep, Panel->CurrPos.y));
-    }
-
-    // NOTE: Make sure our bounds are correct
-    f32 Epsilon = 0.001f;
-    Assert((ButtonBounds.Max.y - ButtonBounds.Min.y) - Epsilon <= Panel->Size);
-    Assert((ButtonBounds.Max.y - ButtonBounds.Min.y) + Epsilon >= Panel->Size);
-
-    ui_button_interaction Result = UiProcessButton(Panel->UiState, ButtonBounds, UiElementRef(UiType_Button, (u32)Name));
-
-    // NOTE: Animate button
-    v4 Color = V4(1, 1, 1, 1);
-    if (Result == UiButtonInteraction_Hover)
-    {
-        Color = V4(0, 1, 1, 1);
-    }
-    else if (Result == UiButtonInteraction_Selected)
-    {
-        Color = V4(0.4f, 0.6f, 0.6f, 1.0f);
-    }
-
-    // TODO: Can this be a text button?
-    // TODO: FIX
-    //UiRenderText(Panel->UiState, FontId, V2(TextBounds.Min.x, TextBounds.Max.y), Name, Color);
-    //UiRect(Panel->UiState, ButtonBounds, 0, V4(0.5f, 0.5f, 1.0f, 1.0f));
-
-    Panel->CurrPos.x += AabbGetDim(ButtonBounds).x;
-#endif
-    
-    return Result;
-}
-
-inline void UiPanelDropDown(ui_panel* Panel, char** Options, u32 NumOptions, u32* OptionResult)
-{
-#if 0
-    // TODO: Customize??
-    u32 NumShownOptions = 4;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    f32 DropDownWidth = 4*Panel->Size;
-    aabb2 DropDownBounds = AabbMinMax(V2(Panel->CurrPos.x, Panel->CurrPos.y - Panel->Size),
-                                      V2(Panel->CurrPos.x + DropDownWidth, Panel->CurrPos.y));
-
-    Panel->CurrPos.x += DropDownWidth;
-
-    // TODO: FIX
-    //UiDropDown(Panel->UiState, DropDownBounds, NumOptions, NumShownOptions, Options, OptionResult);
-#endif
-}
-
-inline void UiPanelF32(ui_panel* Panel, char* Name, f32* Val)
-{
-#if 0
-    play_state* InputState = Panel->UiState->InputState;
-    // TODO: Customize?
-    u32 FontId = Font_General;
-    input_mouse* Input = Panel->UiState->Input;
-    
-    Panel->CurrPos.x += Panel->StepGap.x;
-
-    char NewText[512];
-    Snprintf(NewText, sizeof(NewText), "%s: %f", Name, *Val);
-
-    aabb2 TextBounds = {};
-    {
-        f32 TextMinY = Panel->CurrPos.y - Panel->Size;
-        f32 TextMaxY = Panel->CurrPos.y;
-        v2 TextStartPos = V2(Panel->CurrPos.x, UiTextGetStartY(Panel->UiState, FontId, TextMinY, TextMaxY));
-        // TODO: FIX
-        TextBounds = {}; //UiSizeText(Panel->UiState, FontId, TextStartPos, TextMaxY - TextMinY, NewText);
-    }
-
-    interaction_ref F32Ref = UiElementRef(UiType_DragF32, (u32)Val);
-
-    b32 IntersectText = UiIntersect(TextBounds, Panel->UiState->Input->ScreenPos);
-    b32 MouseDownOrReleased = ((Input->ButtonFlags & MouseButtonFlag_PressedOrHeld) ||
-                               (Input->ButtonFlags & MouseButtonFlag_Released));
-    Panel->UiState->MouseTouchingUi = Panel->UiState->MouseTouchingUi || IntersectText;
-    if (IntersectText || (MouseDownOrReleased && InteractionsAreSame(InputState->PrevHot.Ref, F32Ref)))
-    {
-        interaction DragF32Interaction = {};
-        DragF32Interaction.Type = Interaction_DragF32;
-        DragF32Interaction.Ref = F32Ref;
-        DragF32Interaction.DragF32.Value = Val;
-        
-        PlayerAddInteraction(InputState, DragF32Interaction);
-    }
-
-    // NOTE: Check ui drag interaction from last frame
-    ui_button_interaction Interaction = UiButtonInteraction_None;
-    if (InteractionsAreSame(F32Ref, InputState->PrevHot.Ref))
-    {
-        Interaction = InputState->PrevHot.DragF32.Interaction;
-    }
-
-    v4 Color = V4(1, 1, 1, 1);
-    if (Interaction == UiButtonInteraction_Hover)
-    {
-        Color = V4(0, 1, 1, 1);
-    }
-    else if (Interaction == UiButtonInteraction_Selected)
-    {
-        Color = V4(0.4f, 0.6f, 0.6f, 1.0f);
-    }
-
-    // TODO: FIX
-    //UiRenderText(Panel->UiState, FontId, V2(TextBounds.Min.x, TextBounds.Max.y), NewText, Color);
-
-    // NOTE: Update panel
-    Panel->CurrPos.x += AabbGetDim(TextBounds).x;
     UiPanelNextRow(Panel);
-#endif
+    UiPanelIndent(Panel);
 }
 
-inline void UiEndPanel(ui_panel* Panel)
+inline void UiPanelEnd(ui_panel* Panel)
 {
-#if 0
-    // NOTE: Get the maximum bounds of panel
-    Panel->MinPosY = Min(Panel->MinPosY, Panel->CurrPos.y);
-
-    // NOTE: Add border to the panel
-    Panel->MinPosY -= Panel->RowStepY + Panel->StepGap.y;
+    // NOTE: Finis the row we are currently on
+    UiPanelNextRow(Panel);
+    // NOTE: Undo line gap since we don't have a new line beneath us
+    Panel->CurrPos.y += Panel->LineGap;
     
-    // NOTE: Create background of the panel
-    v2 Min = V2(Panel->StartPos.x, Panel->MinPosY);
-    v2 Max = V2(Panel->StartPos.x + Panel->MaxWidth, Panel->StartPos.y);
-    // TODO: FIX
-    //UiRect(Panel->UiState, AabbMinMax(Min, Max), 0, V4(0, 0, 0, 1));
-#endif
+    aabb2 PanelBounds = {};
+    PanelBounds.Min.x = Panel->TopLeftPos->x;
+    PanelBounds.Min.y = Panel->CurrPos.y - Panel->BorderGap;
+    PanelBounds.Max.x = Panel->PanelMaxX + Panel->BorderGap;
+    PanelBounds.Max.y = Panel->TopLeftPos->y;
+
+    // NOTE: Title
+    {
+        aabb2 TitleBounds = {};
+        TitleBounds.Min.x = PanelBounds.Min.x;
+        TitleBounds.Min.y = PanelBounds.Max.y - Panel->TitleHeight;
+        TitleBounds.Max.x = PanelBounds.Max.x;
+        TitleBounds.Max.y = PanelBounds.Max.y;
+
+        // NOTE: Calculate interaction with the panel for dragging
+        UiDragabbleBoxNoRender(Panel->UiState, TitleBounds, Panel->TopLeftPos);
+
+        aabb2 TextBounds = UiStateGetTextSizeCentered(Panel->UiState, Panel->MaxCharHeight, Panel->Name);
+        TextBounds = Translate(TextBounds, AabbGetCenter(TitleBounds));
+
+        UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Panel->Name, V4(1));
+        UiRect(Panel->UiState, TitleBounds, V4(0.05f, 0.05f, 0.05f, 1.0f));
+    }
+
+    // NOTE: Background
+    UiStatePushRectOutline(Panel->UiState, PanelBounds, V4(0.0f, 0.0f, 0.0f, 1.0f), RoundToF32(Panel->BorderGap / 2.0f));
+    UiRect(Panel->UiState, PanelBounds, V4(0.1f, 0.4f, 0.7f, 1.0f));
 }
-#endif
+
+inline void UiPanelHorizontalSlider(ui_panel* Panel, f32 MinValue, f32 MaxValue, f32* PercentValue)
+{
+    aabb2 SliderBounds = Translate(Panel->SliderBounds, Panel->CurrPos);
+    UiHorizontalSlider(Panel->UiState, SliderBounds, Panel->KnobRadius, MinValue, MaxValue, PercentValue);
+
+    // NOTE: Increment current position in panel
+    f32 MaxDimY = Max(AabbGetDim(SliderBounds).y, 2*Panel->KnobRadius.y);
+    Panel->CurrPos.x += AabbGetDim(SliderBounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, MaxDimY);
+}
+
+inline void UiPanelText(ui_panel* Panel, char* Text)
+{
+    aabb2 TextBounds = UiStateGetTextSizeCentered(Panel->UiState, Panel->MaxCharHeight, Text);
+    TextBounds = Translate(TextBounds, Panel->CurrPos + V2(1, -1) * AabbGetRadius(TextBounds));
+    UiStatePushTextNoFormat(Panel->UiState, TextBounds, Panel->MaxCharHeight, Text, V4(1, 1, 1, 1));
+
+    // NOTE: Increment current position in panel
+    Panel->CurrPos.x += AabbGetDim(TextBounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, AabbGetDim(TextBounds).y);
+}
+
+inline void UiPanelNumberBox(ui_panel* Panel, f32 MinValue, f32 MaxValue, f32* FloatValue)
+{
+    aabb2 Bounds = Translate(Panel->NumberBoxBounds, Panel->CurrPos);
+    UiNumberBox(Panel->UiState, Panel->MaxCharHeight, Bounds, MinValue, MaxValue, FloatValue);
+    
+    // NOTE: Increment current position in panel
+    Panel->CurrPos.x += AabbGetDim(Bounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, AabbGetDim(Bounds).y);
+}
+
+inline void UiPanelNumberBox(ui_panel* Panel, f32* FloatValue)
+{
+    UiPanelNumberBox(Panel, F32_MIN, F32_MAX, FloatValue);
+}
+
+/*
+   TODO: Implement later
+inline void UiPanelButton(ui_panel* Panel)
+{
+}
+
+inline void UiPanelCheckMark(ui_panel* Panel)
+{
+}
+*/
