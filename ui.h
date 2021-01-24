@@ -11,16 +11,6 @@
 #include "math\math.h"
 #include "memory\memory.h"
 
-/* TODO: Memory Stuff
-
-   TODO: We want to be able to suballocate this arena into blocks and share it amongst different allocators. Write up the
-   block arena to do that and then we just store a dynamic arena as the parent. Maybe in that case call this a platform_arena
-   since it actually goes through the platform to allocate
-
-   TODO: Make GPU arenas expandable by either recreating the whole thing (resizeable array) or linked list of memory blocks. This will work
-   well with above move to making CPU arena dynamic
-*/
-
 #define UI_HOVER_TEXT_COLOR V4(0.7f, 0.7f, 0.3f, 1.0f)
 #define UI_SELECTED_TEXT_COLOR V4(0.9f, 0.9f, 0.1f, 1.0f)
 
@@ -209,7 +199,7 @@ struct ui_state
     u32 GpuLocalMemoryId;
     vk_linear_arena GpuArena;
     vk_linear_arena GpuTempArena; // NOTE: For single frame data
-
+    
     platform_block_arena CpuBlockArena;
     
     // NOTE: Font data

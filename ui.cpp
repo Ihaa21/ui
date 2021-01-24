@@ -404,7 +404,7 @@ inline void UiStateBegin(ui_state* UiState, f32 FrameTime, u32 RenderWidth, u32 
     UiState->FrameTime = FrameTime;
     UiState->RenderWidth = RenderWidth;
     UiState->RenderHeight = RenderHeight;
-
+    
     // NOTE: Ui Input
     {
         UiState->PrevInput = UiState->CurrInput;
