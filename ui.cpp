@@ -92,7 +92,7 @@ inline void UiTextBoxRemoveChar(char* Ptr, i32* CurrSize, i32 DeleteCharId)
 
 inline void UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena* TempArena, u32 LocalMemType,
                           vk_descriptor_manager* DescriptorManager, vk_pipeline_manager* PipelineManager,
-                          vk_transfer_manager* TransferManager, VkFormat ColorFormat, ui_state* UiState)
+                          vk_transfer_manager* TransferManager, VkFormat ColorFormat, VkImageLayout FinalLayout, ui_state* UiState)
 {
     temp_mem TempMem = BeginTempMem(TempArena);
     
@@ -304,12 +304,13 @@ inline void UiStateCreate(VkDevice Device, linear_arena* CpuArena, linear_arena*
         }
     }
 
-    // NOTE: Rect Color Target
+    // NOTE: Color Target
     {        
         vk_render_pass_builder RpBuilder = VkRenderPassBuilderBegin(TempArena);
+        
         u32 ColorId = VkRenderPassAttachmentAdd(&RpBuilder, ColorFormat, VK_ATTACHMENT_LOAD_OP_LOAD,
                                                 VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                                                FinalLayout);
         u32 DepthId = VkRenderPassAttachmentAdd(&RpBuilder, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
                                                 VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED,
                                                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
@@ -655,19 +656,27 @@ inline void UiStateEnd(ui_state* UiState, vk_descriptor_manager* DescriptorManag
         {
             vkDestroyBuffer(UiState->Device, UiState->GpuRectBuffer, 0);
         }
-        UiState->GpuRectBuffer = VkBufferHandleCreate(UiState->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                                      sizeof(ui_render_rect) * UiState->NumRects);
-        VkMemoryRequirements RectRequirements = VkBufferGetMemoryRequirements(UiState->Device, UiState->GpuRectBuffer);
-        TotalMemoryRequired = VkIncrementPointer(TotalMemoryRequired, RectRequirements);
+        VkMemoryRequirements RectRequirements = {};
+        if (UiState->NumRects > 0)
+        {
+            UiState->GpuRectBuffer = VkBufferHandleCreate(UiState->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                          sizeof(ui_render_rect) * UiState->NumRects);
+            RectRequirements = VkBufferGetMemoryRequirements(UiState->Device, UiState->GpuRectBuffer);
+            TotalMemoryRequired = VkIncrementPointer(TotalMemoryRequired, RectRequirements);
+        }
         
         if (UiState->GpuGlyphBuffer == VK_NULL_HANDLE)
         {
             vkDestroyBuffer(UiState->Device, UiState->GpuGlyphBuffer, 0);
         }
-        UiState->GpuGlyphBuffer = VkBufferHandleCreate(UiState->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                                       sizeof(ui_render_glyph_gpu) * UiState->NumGlyphs);
-        VkMemoryRequirements GlyphRequirements = VkBufferGetMemoryRequirements(UiState->Device, UiState->GpuGlyphBuffer);
-        TotalMemoryRequired = VkIncrementPointer(TotalMemoryRequired, GlyphRequirements);
+        VkMemoryRequirements GlyphRequirements = {};
+        if (UiState->NumGlyphs > 0)
+        {
+            UiState->GpuGlyphBuffer = VkBufferHandleCreate(UiState->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                           sizeof(ui_render_glyph_gpu) * UiState->NumGlyphs);
+            GlyphRequirements = VkBufferGetMemoryRequirements(UiState->Device, UiState->GpuGlyphBuffer);
+            TotalMemoryRequired = VkIncrementPointer(TotalMemoryRequired, GlyphRequirements);
+        }
         
         if (UiState->GpuTempArena.Memory != VK_NULL_HANDLE)
         {
@@ -680,8 +689,14 @@ inline void UiStateEnd(ui_state* UiState, vk_descriptor_manager* DescriptorManag
         VkImageBindMemory(UiState->Device, &UiState->GpuTempArena, UiState->DepthImage.Image, DepthRequirements);
         UiState->DepthImage.View = VkImageViewCreate(UiState->Device, UiState->DepthImage.Image, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D32_SFLOAT,
                                                      VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1);
-        VkBufferBindMemory(UiState->Device, &UiState->GpuTempArena, UiState->GpuRectBuffer, RectRequirements);
-        VkBufferBindMemory(UiState->Device, &UiState->GpuTempArena, UiState->GpuGlyphBuffer, GlyphRequirements);
+        if (UiState->NumRects > 0)
+        {
+            VkBufferBindMemory(UiState->Device, &UiState->GpuTempArena, UiState->GpuRectBuffer, RectRequirements);
+        }
+        if (UiState->NumGlyphs > 0)
+        {
+            VkBufferBindMemory(UiState->Device, &UiState->GpuTempArena, UiState->GpuGlyphBuffer, GlyphRequirements);
+        }
     }
     
     // NOTE: Upload rects to GPU
