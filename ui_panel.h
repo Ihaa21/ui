@@ -15,6 +15,8 @@ struct ui_panel
     f32 CurrRowMaxY;
 
     // NOTE: Standard sized values
+    aabb2 CheckBoxBounds;
+    
     aabb2 SliderBounds;
     v2 KnobRadius;
 

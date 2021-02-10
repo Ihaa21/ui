@@ -13,6 +13,7 @@ inline ui_panel UiPanelBegin(ui_state* UiState, v2* TopLeftPos, char* Name)
     // NOTE: Set standard sized values
     {
         // NOTE: All bounds have the min at the top left corner
+        
         Result.KnobRadius = V2(20);
         Result.SliderBounds = AabbCenterRadius(V2(100.0f, -Result.KnobRadius.y), V2(100, 5));
 
@@ -20,6 +21,8 @@ inline ui_panel UiPanelBegin(ui_state* UiState, v2* TopLeftPos, char* Name)
 
         v2 NumberBoxRadius = V2(55, 20);
         Result.NumberBoxBounds = AabbCenterRadius(V2(1, -1) * NumberBoxRadius, NumberBoxRadius);
+
+        Result.CheckBoxBounds = AabbCenterRadius(V2(Result.MaxCharHeight/2, -Result.MaxCharHeight/2), V2(Result.MaxCharHeight/2));
 
         // IMPORTANT: All bounds should be created such that top left is 0,0
         Result.BorderGap = 15.0f;
@@ -90,6 +93,16 @@ inline void UiPanelEnd(ui_panel* Panel)
     // NOTE: Background
     UiStatePushRectOutline(Panel->UiState, PanelBounds, V4(0.0f, 0.0f, 0.0f, 1.0f), RoundToF32(Panel->BorderGap / 2.0f));
     UiRect(Panel->UiState, PanelBounds, V4(0.1f, 0.4f, 0.7f, 1.0f));
+}
+
+inline void UiPanelCheckBox(ui_panel* Panel, b32* Bool)
+{
+    aabb2 Bounds = Translate(Panel->CheckBoxBounds, Panel->CurrPos);
+    UiCheckBox(Panel->UiState, Bounds, Bool);
+    
+    // NOTE: Increment current position in panel
+    Panel->CurrPos.x += AabbGetDim(Bounds).x + Panel->ElementGap;
+    Panel->CurrRowMaxY = Max(Panel->CurrRowMaxY, AabbGetDim(Bounds).y);
 }
 
 inline void UiPanelHorizontalSlider(ui_panel* Panel, f32 MinValue, f32 MaxValue, f32* PercentValue)

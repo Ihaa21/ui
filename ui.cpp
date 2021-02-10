@@ -494,6 +494,28 @@ inline void UiStateEnd(ui_state* UiState, vk_descriptor_manager* DescriptorManag
         ui_interaction* Selected = &UiState->Selected;
         switch (Hot->Type)
         {
+            case UiElementType_CheckBox:
+            {
+                if (CurrInput->MouseDown)
+                {
+                    Hot->Button = UiInteractionType_Selected;
+                    UiState->PrevHot = UiState->Hot;
+                }
+                else if (UiState->MouseFlags & UiMouseFlag_Released)
+                {
+                    if (UiInteractionsAreSame(UiState->PrevHot, *Hot))
+                    {
+                        Hot->Button = UiInteractionType_Released;
+                        UiState->PrevHot = UiState->Hot;
+                    }
+                }
+                else
+                {
+                    Hot->Button = UiInteractionType_Hover;
+                    UiState->PrevHot = UiState->Hot;
+                }
+            } break;
+            
             case UiElementType_Button:
             {
                 if (CurrInput->MouseDown)
@@ -836,8 +858,8 @@ inline void UiStateRender(ui_state* UiState, VkDevice Device, vk_commands Comman
                     VkRect2D Scissor = {};
                     Scissor.extent.width = AabbGetDim(ClipRect->Bounds).x;
                     Scissor.extent.height = AabbGetDim(ClipRect->Bounds).y;
-                    Scissor.offset.x = ClipRect->Bounds.Min.x;
-                    Scissor.offset.y = UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height;
+                    Scissor.offset.x = Clamp(ClipRect->Bounds.Min.x, 0, i32(UiState->RenderWidth));
+                    Scissor.offset.y = Clamp(i32(UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height), 0, i32(UiState->RenderHeight));
                     vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
 
                     vkCmdDrawIndexed(Commands.Buffer, 6, ClipRect->NumRectsAffected, 0, 0, CurrRectId);
@@ -881,8 +903,8 @@ inline void UiStateRender(ui_state* UiState, VkDevice Device, vk_commands Comman
                     VkRect2D Scissor = {};
                     Scissor.extent.width = AabbGetDim(ClipRect->Bounds).x;
                     Scissor.extent.height = AabbGetDim(ClipRect->Bounds).y;
-                    Scissor.offset.x = ClipRect->Bounds.Min.x;
-                    Scissor.offset.y = UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height;
+                    Scissor.offset.x = Clamp(ClipRect->Bounds.Min.x, 0, i32(UiState->RenderWidth));
+                    Scissor.offset.y = Clamp(i32(UiState->RenderHeight - ClipRect->Bounds.Min.y - Scissor.extent.height), 0, i32(UiState->RenderHeight));
                     vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
 
                     vkCmdDrawIndexed(Commands.Buffer, 6, ClipRect->NumGlyphsAffected, 0, 0, CurrGlyphId);
@@ -1236,6 +1258,40 @@ inline void UiStatePushTextNoFormat(ui_state* UiState, aabb2 Bounds, f32 MaxChar
 //
 // NOTE: Ui Elements
 //
+
+inline void UiCheckBox(ui_state* UiState, aabb2 Bounds, b32* Bool)
+{
+    Assert(Bounds.Min.x < Bounds.Max.x);
+    Assert(Bounds.Min.y < Bounds.Max.y);
+    
+    ui_interaction_type Interaction = UiStateProcessElement(UiState, Bounds, UiElementHash(UiElementType_CheckBox, u32(uintptr_t(Bool))));
+    v4 Color = V4(0.95f);
+    switch(Interaction)
+    {
+        case UiInteractionType_Hover:
+        {
+            Color = V4(1.0f);
+        } break;
+
+        case UiInteractionType_Selected:
+        {
+            Color = V4(1.0f);
+            Bounds = Enlarge(Bounds, V2(-1));
+        } break;
+
+        case UiInteractionType_Released:
+        {
+            *Bool = !*Bool;
+        } break;
+    }
+    
+    UiStatePushRectOutline(UiState, Bounds, Color, 2);
+    if (*Bool)
+    {
+        UiStatePushRect(UiState, Enlarge(Bounds, V2(-4)), V4(0.2f, 1.0f, 0.2f, 1.0f));
+    }
+    UiStatePushRect(UiState, Bounds, V4(0, 0, 0, 1));
+}
 
 #define UiButton(UiState, Bounds, Color) UiButton_(UiState, Bounds, Color, (u32)UI_FILE_LINE_ID())
 inline ui_interaction_type UiButton_(ui_state* UiState, aabb2 Bounds, v4 Color, u32 Hash)

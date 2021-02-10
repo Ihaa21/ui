@@ -177,6 +177,7 @@ enum ui_element_type
     UiElementType_DraggableBox,
     UiElementType_Image,
     UiElementType_FloatNumberBox,
+    UiElementType_CheckBox,
 };
 
 struct ui_interaction
